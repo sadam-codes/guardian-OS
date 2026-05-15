@@ -2,11 +2,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy.orm import Session
 
 from config.database import get_db
-from helpers.activity_log import (
-    STATUS_FAILURE,
-    STATUS_SUCCESS,
-    record_activity,
-)
+from helpers.activity_log import STATUS_FAILURE, STATUS_SUCCESS, record_activity
 from helpers.face_auth import (
     FaceAuthError,
     delete_user,
@@ -30,7 +26,7 @@ router = APIRouter(prefix="/face", tags=["face"])
 
 
 async def _read_image(image: UploadFile) -> bytes:
-    if not image.content_type or not image.content_type.startswith("image/"):
+    if image.content_type and not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Upload a valid image file (JPG/PNG).")
     data = await image.read()
     if not data:
@@ -38,18 +34,36 @@ async def _read_image(image: UploadFile) -> bytes:
     return data
 
 
+async def _collect_image_bytes(
+    image: UploadFile | None,
+    images: list[UploadFile] | None,
+) -> list[bytes]:
+    uploads: list[UploadFile] = []
+    if image and image.filename:
+        uploads.append(image)
+    for item in images or []:
+        if item.filename:
+            uploads.append(item)
+    if not uploads:
+        raise HTTPException(status_code=400, detail="Upload at least one camera frame.")
+    return [await _read_image(item) for item in uploads]
+
+
 @router.post("/signup", response_model=FaceSignupResponse)
 async def face_signup(
     name: str = Form(..., min_length=1, max_length=100),
-    image: UploadFile = File(...),
+    image: UploadFile | None = File(default=None),
+    images: list[UploadFile] = File(default=[]),
     role: str = Form(default=ROLE_USER),
     actor_role: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ) -> FaceSignupResponse:
-    image_bytes = await _read_image(image)
+    image_bytes_list = await _collect_image_bytes(image, images)
     actor = actor_role if actor_role == "admin" else None
     try:
-        user = signup_face(db, name, image_bytes, role=role, actor_role=actor_role)
+        user = signup_face(
+            db, name, image_bytes_list=image_bytes_list, role=role, actor_role=actor_role
+        )
     except FaceAuthError as exc:
         record_activity(
             db,
@@ -71,7 +85,7 @@ async def face_signup(
         target_name=user.name,
     )
     return FaceSignupResponse(
-        message=f"{user.name} enrolled successfully as {role_label}.",
+        message=f"{user.name} enrolled with face scan as {role_label}.",
         name=user.name,
         id=user.id,
         role=user.role,
@@ -80,12 +94,13 @@ async def face_signup(
 
 @router.post("/login", response_model=FaceLoginResponse)
 async def face_login(
-    image: UploadFile = File(...),
+    image: UploadFile | None = File(default=None),
+    images: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
 ) -> FaceLoginResponse:
-    image_bytes = await _read_image(image)
+    image_bytes_list = await _collect_image_bytes(image, images)
     try:
-        user = login_face(db, image_bytes)
+        user = login_face(db, image_bytes_list=image_bytes_list)
     except FaceAuthError as exc:
         record_activity(
             db,
@@ -166,7 +181,6 @@ async def update_registered_user(
         actor_name=actor_name,
         target_name=user.name,
     )
-
     item = RegisteredUserItem(id=user.id, name=user.name, role=user.role, created_at=user.created_at)
     return UserUpdateResponse(message=f"Updated {user.name} successfully.", user=item)
 
@@ -175,23 +189,21 @@ async def update_registered_user(
 def remove_registered_user(
     user_id: int,
     actor_role: str,
-    actor_name: str | None = None,
+    actor_user_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> UserDeleteResponse:
     user = get_user_by_id(db, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found.")
-
     display_name = user.name
     try:
-        delete_user(db, user_id, actor_role=actor_role, actor_name=actor_name)
+        delete_user(db, user_id, actor_role=actor_role, actor_user_id=actor_user_id)
     except FaceAuthError as exc:
         record_activity(
             db,
             event_type="user_delete",
             status=STATUS_FAILURE,
             message=exc.message,
-            actor_name=actor_name,
             target_name=display_name,
         )
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -201,10 +213,8 @@ def remove_registered_user(
         event_type="user_delete",
         status=STATUS_SUCCESS,
         message=f"Deleted user {display_name}",
-        actor_name=actor_name,
         target_name=display_name,
     )
-
     return UserDeleteResponse(message=f"Deleted {display_name} successfully.")
 
 

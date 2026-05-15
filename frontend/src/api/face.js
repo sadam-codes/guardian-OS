@@ -1,4 +1,5 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
+const REQUEST_TIMEOUT_MS = 15000
 
 async function parseError(response) {
   const data = await response.json().catch(() => ({}))
@@ -8,14 +9,36 @@ async function parseError(response) {
   return 'Something went wrong. Please try again.'
 }
 
-export async function faceSignup(name, imageFile, role = 'user', actorRole = null) {
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Request timed out. Check your connection and try again.')
+    }
+    throw err
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function appendImages(form, imageFiles) {
+  const files = Array.isArray(imageFiles) ? imageFiles : [imageFiles]
+  files.forEach((file, index) => {
+    form.append('images', file, file.name || `face-${index}.jpg`)
+  })
+}
+
+export async function faceSignup(name, imageFiles, role = 'user', actorRole = null) {
   const form = new FormData()
   form.append('name', name.trim())
-  form.append('image', imageFile, imageFile.name || 'capture.jpg')
+  appendImages(form, imageFiles)
   form.append('role', role)
   if (actorRole) form.append('actor_role', actorRole)
 
-  const res = await fetch(`${API_BASE}/face/signup`, {
+  const res = await fetchWithTimeout(`${API_BASE}/face/signup`, {
     method: 'POST',
     body: form,
   })
@@ -24,11 +47,11 @@ export async function faceSignup(name, imageFile, role = 'user', actorRole = nul
   return res.json()
 }
 
-export async function faceLogin(imageFile) {
+export async function faceLogin(imageFiles) {
   const form = new FormData()
-  form.append('image', imageFile, imageFile.name || 'capture.jpg')
+  appendImages(form, imageFiles)
 
-  const res = await fetch(`${API_BASE}/face/login`, {
+  const res = await fetchWithTimeout(`${API_BASE}/face/login`, {
     method: 'POST',
     body: form,
   })
@@ -60,9 +83,9 @@ export async function updateUser(userId, { name, role, imageFile }, actorRole, a
   return res.json()
 }
 
-export async function deleteUser(userId, actorRole, actorName = null) {
+export async function deleteUser(userId, actorRole, actorUserId = null) {
   const params = new URLSearchParams({ actor_role: actorRole })
-  if (actorName) params.append('actor_name', actorName)
+  if (actorUserId != null) params.append('actor_user_id', String(actorUserId))
 
   const res = await fetch(`${API_BASE}/face/users/${userId}?${params}`, {
     method: 'DELETE',

@@ -1,3 +1,4 @@
+# Guardian OS backend — direct dependencies (install with: pip install -r requirements.txt)
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 python-dotenv>=1.0.0
@@ -6,3 +7,5 @@ psycopg2-binary>=2.9.0
 python-multipart>=0.0.9
 opencv-python-headless>=4.8.0
 numpy>=1.24.0
+onnxruntime>=1.16.0
+insightface==0.2.1

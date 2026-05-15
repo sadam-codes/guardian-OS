@@ -2,12 +2,17 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from helpers.face_encoder import (
+    BIOMETRIC_FACE,
+    ENCODING_VERSION,
     FaceEncoderError,
+    average_encodings,
+    build_probes_from_samples,
     encoding_from_json,
     encoding_to_json,
     extract_face_encoding,
-    face_distance,
-    is_match,
+    face_similarity,
+    is_signup_duplicate,
+    passes_login_similarity,
 )
 from helpers.roles import ROLE_ADMIN, ROLE_USER, VALID_ROLES
 from models.register import Register
@@ -20,70 +25,106 @@ class FaceAuthError(Exception):
         super().__init__(message)
 
 
-def _find_matching_user(db: Session, encoding: np.ndarray) -> tuple[Register | None, float]:
-    best_user: Register | None = None
-    best_distance = float("inf")
-
+def _versions_in_db(db: Session) -> set[int]:
+    versions: set[int] = set()
     for user in db.query(Register).all():
-        known = encoding_from_json(user.face_encoding)
-        distance = face_distance(known, encoding)
-        if distance < best_distance:
-            best_distance = distance
-            best_user = user
+        _, _, version = encoding_from_json(user.face_encoding)
+        versions.add(version)
+    return versions
 
-    return best_user, best_distance
+
+def _probes_from_samples(db: Session, samples: list[bytes]) -> dict[int, np.ndarray]:
+    versions = _versions_in_db(db) | {ENCODING_VERSION}
+    try:
+        return build_probes_from_samples(samples, versions)
+    except FaceEncoderError as exc:
+        raise FaceAuthError(str(exc)) from exc
+
+
+def _score_all_users(
+    db: Session, probes: dict[int, np.ndarray]
+) -> list[tuple[Register, float, int]]:
+    scores: list[tuple[Register, float, int]] = []
+    for user in db.query(Register).all():
+        _, known, version = encoding_from_json(user.face_encoding)
+        probe = probes.get(version)
+        if probe is None or known.shape != probe.shape:
+            continue
+        similarity = face_similarity(known, probe)
+        if similarity > 0:
+            scores.append((user, similarity, version))
+    scores.sort(key=lambda item: item[1], reverse=True)
+    return scores
+
+
+def _resolve_login(scores: list[tuple[Register, float, int]]) -> tuple[Register, float, int]:
+    if not scores:
+        raise FaceAuthError("Face not recognized. Please sign up first.", 401)
+
+    best_user, best_sim, best_version = scores[0]
+    if not passes_login_similarity(best_sim):
+        raise FaceAuthError("Face not recognized. Please sign up first.", 401)
+
+    return best_user, best_sim, best_version
+
+
+def _check_duplicate_face(db: Session, probes: dict[int, np.ndarray]) -> None:
+    scores = [
+        entry
+        for entry in _score_all_users(db, probes)
+        if entry[2] == ENCODING_VERSION
+    ]
+    if not scores:
+        return
+    best_user, best_sim, _ = scores[0]
+    second_sim = scores[1][1] if len(scores) > 1 else None
+    if is_signup_duplicate(best_sim, second_sim):
+        raise FaceAuthError(
+            f"This face is already registered as '{best_user.name}'. Use sign in instead.",
+            409,
+        )
 
 
 def _resolve_signup_role(db: Session, requested_role: str, actor_role: str | None) -> str:
     role = (requested_role or ROLE_USER).strip().lower()
     if role not in VALID_ROLES:
         raise FaceAuthError("Role must be 'admin' or 'user'.")
-
-    user_count = db.query(Register).count()
-
-    if user_count == 0:
+    if db.query(Register).count() == 0:
         return ROLE_ADMIN
-
     if role == ROLE_ADMIN and actor_role != ROLE_ADMIN:
         raise FaceAuthError("Only an admin can create admin accounts.", 403)
-
     return role
 
 
 def signup_face(
     db: Session,
     name: str,
-    image_bytes: bytes,
+    image_bytes: bytes | None = None,
+    image_bytes_list: list[bytes] | None = None,
     role: str = ROLE_USER,
     actor_role: str | None = None,
+    biometric_type: str = BIOMETRIC_FACE,
 ) -> Register:
     clean_name = name.strip()
     if not clean_name:
         raise FaceAuthError("Name is required.")
 
-    existing = db.query(Register).filter(Register.name == clean_name).first()
-    if existing:
-        raise FaceAuthError("This name is already registered. Use login or another name.", 409)
+    samples = list(image_bytes_list or [])
+    if image_bytes is not None:
+        samples.insert(0, image_bytes)
+    if not samples:
+        raise FaceAuthError("Camera image required.")
 
-    assigned_role = _resolve_signup_role(db, role, actor_role)
-
-    try:
-        encoding = extract_face_encoding(image_bytes)
-    except FaceEncoderError as exc:
-        raise FaceAuthError(str(exc)) from exc
-
-    encoding_vec = np.array(encoding, dtype=np.float64)
-    duplicate, distance = _find_matching_user(db, encoding_vec)
-    if duplicate is not None and is_match(distance):
-        raise FaceAuthError(
-            f"This face is already registered as '{duplicate.name}'. Use sign in instead.",
-            409,
-        )
+    probes = _probes_from_samples(db, samples)
+    _check_duplicate_face(db, probes)
 
     user = Register(
         name=clean_name,
-        face_encoding=encoding_to_json(encoding),
-        role=assigned_role,
+        face_encoding=encoding_to_json(
+            average_encodings([extract_face_encoding(s) for s in samples]),
+            BIOMETRIC_FACE,
+        ),
+        role=_resolve_signup_role(db, role, actor_role),
     )
     db.add(user)
     db.commit()
@@ -91,19 +132,37 @@ def signup_face(
     return user
 
 
-def login_face(db: Session, image_bytes: bytes) -> Register:
-    try:
-        unknown = np.array(extract_face_encoding(image_bytes), dtype=np.float64)
-    except FaceEncoderError as exc:
-        raise FaceAuthError(str(exc)) from exc
+def login_face(
+    db: Session,
+    image_bytes: bytes | None = None,
+    image_bytes_list: list[bytes] | None = None,
+    biometric_type: str = BIOMETRIC_FACE,
+) -> Register:
+    samples = list(image_bytes_list or [])
+    if image_bytes is not None:
+        samples.insert(0, image_bytes)
+    if not samples:
+        raise FaceAuthError("Camera image required.")
 
     if not db.query(Register).count():
         raise FaceAuthError("No registered users. Sign up first.", 404)
 
-    best_user, best_distance = _find_matching_user(db, unknown)
+    try:
+        probes = _probes_from_samples(db, samples)
+    except FaceEncoderError as exc:
+        raise FaceAuthError(str(exc)) from exc
 
-    if best_user is None or not is_match(best_distance):
-        raise FaceAuthError("Face not recognized. Please sign up first.", 401)
+    scores = _score_all_users(db, probes)
+    best_user, _, best_version = _resolve_login(scores)
+
+    if best_version != ENCODING_VERSION:
+        try:
+            upgraded = average_encodings([extract_face_encoding(s) for s in samples])
+            best_user.face_encoding = encoding_to_json(upgraded, BIOMETRIC_FACE)
+            db.commit()
+            db.refresh(best_user)
+        except FaceEncoderError:
+            pass
 
     return best_user
 
@@ -133,9 +192,9 @@ def update_user(
     name: str | None = None,
     role: str | None = None,
     image_bytes: bytes | None = None,
+    biometric_type: str = BIOMETRIC_FACE,
 ) -> Register:
     _require_admin(actor_role)
-
     user = get_user_by_id(db, user_id)
     if user is None:
         raise FaceAuthError("User not found.", 404)
@@ -147,13 +206,6 @@ def update_user(
         clean_name = name.strip()
         if not clean_name:
             raise FaceAuthError("Name is required.")
-        duplicate = (
-            db.query(Register)
-            .filter(Register.name == clean_name, Register.id != user_id)
-            .first()
-        )
-        if duplicate:
-            raise FaceAuthError("This name is already in use.", 409)
         user.name = clean_name
 
     if role is not None:
@@ -164,25 +216,12 @@ def update_user(
             raise FaceAuthError("Cannot remove the last administrator.", 400)
         user.role = new_role
 
-    if name is None and role is None and image_bytes is None:
-        raise FaceAuthError("No changes provided.")
-
     if image_bytes is not None:
         try:
             encoding = extract_face_encoding(image_bytes)
         except FaceEncoderError as exc:
             raise FaceAuthError(str(exc)) from exc
-
-        encoding_vec = np.array(encoding, dtype=np.float64)
-        for other in db.query(Register).filter(Register.id != user_id).all():
-            known = encoding_from_json(other.face_encoding)
-            distance = face_distance(known, encoding_vec)
-            if is_match(distance):
-                raise FaceAuthError(
-                    f"This face is already registered as '{other.name}'.",
-                    409,
-                )
-        user.face_encoding = encoding_to_json(encoding)
+        user.face_encoding = encoding_to_json(encoding, BIOMETRIC_FACE)
 
     db.commit()
     db.refresh(user)
@@ -194,15 +233,14 @@ def delete_user(
     user_id: int,
     *,
     actor_role: str | None,
-    actor_name: str | None = None,
+    actor_user_id: int | None = None,
 ) -> None:
     _require_admin(actor_role)
-
     user = get_user_by_id(db, user_id)
     if user is None:
         raise FaceAuthError("User not found.", 404)
 
-    if actor_name and user.name.strip().lower() == actor_name.strip().lower():
+    if actor_user_id is not None and user.id == actor_user_id:
         raise FaceAuthError("You cannot delete your own account while signed in.", 400)
 
     if user.role == ROLE_ADMIN and _admin_count(db) <= 1:

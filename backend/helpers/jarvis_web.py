@@ -64,15 +64,7 @@ def resolve_web_open(raw: str) -> tuple[str, str] | None:
         return KNOWN_SITES[name], label
 
     if web_hint:
-        slug = name.replace(" ", "")
-        guesses = [
-            f"https://www.{slug}.edu.pk",
-            f"https://www.{slug}.edu",
-            f"https://{slug}.edu.pk",
-            f"https://www.{slug}.com",
-            f"https://{slug}.com",
-        ]
-        return guesses[0], name.title()
+        return google_search_url(name), f"Google: {name.title()}"
 
     if name == "youtube" or lower.startswith("youtube"):
         return KNOWN_SITES["youtube"], "YouTube"
@@ -80,6 +72,41 @@ def resolve_web_open(raw: str) -> tuple[str, str] | None:
     return None
 
 
+def google_search_url(query: str) -> str:
+    clean = query.strip().strip("'\"")
+    return f"https://www.google.com/search?q={quote(clean)}"
+
+
 def youtube_search_url(query: str) -> str:
     clean = query.strip().strip("'\"")
     return f"https://www.youtube.com/results?search_query={quote(clean)}"
+
+
+_SEARCH_HINTS = (
+    "weather",
+    "news",
+    "price",
+    "how to",
+    "what is",
+    "who is",
+    "where is",
+    "near me",
+    "meaning",
+    "translate",
+    "convert",
+    "recipe",
+    "tutorial",
+    "review",
+)
+
+
+def looks_like_web_search(query: str) -> bool:
+    q = query.strip()
+    if not q:
+        return False
+    lower = q.lower()
+    if " in " in lower or lower.startswith("search "):
+        return True
+    if len(q.split()) >= 4:
+        return True
+    return any(hint in lower for hint in _SEARCH_HINTS)

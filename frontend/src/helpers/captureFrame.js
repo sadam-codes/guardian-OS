@@ -1,4 +1,4 @@
-export function captureFrameFromVideo(video) {
+export function captureFrameFromVideo(video, quality = 0.88) {
   if (!video?.videoWidth) return null
 
   const canvas = document.createElement('canvas')
@@ -16,7 +16,7 @@ export function captureFrameFromVideo(video) {
         resolve(new File([blob], 'frame.jpg', { type: 'image/jpeg' }))
       },
       'image/jpeg',
-      0.88,
+      quality,
     )
   })
 }

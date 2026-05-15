@@ -3,25 +3,32 @@ import json
 import cv2
 import numpy as np
 
-FACE_SIZE = (128, 128)
-MATCH_THRESHOLD = 0.42
+from helpers.insightface_engine import (
+    InsightFaceEngineError,
+    extract_normed_embedding,
+)
 
+BIOMETRIC_FACE = "face"
+ENCODING_VERSION = 4
 
-class FaceEncoderError(Exception):
-    pass
+# ArcFace cosine similarity on L2-normalized 512-d vectors
+LOGIN_MIN_SIMILARITY = 0.40
+SIGNUP_DUPLICATE_MIN_SIMILARITY = 0.55
+SIGNUP_DUPLICATE_MIN_GAP = 0.08
 
+ENCODING_SIZE = (128, 128)
+LBP_GRID = (4, 4)
+LBP_BINS = 32
+
+_hog = cv2.HOGDescriptor((128, 128), (16, 16), (8, 8), (8, 8), 9, 1)
 
 _face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
 
 
-def image_bytes_to_bgr(image_bytes: bytes) -> np.ndarray:
-    arr = np.frombuffer(image_bytes, dtype=np.uint8)
-    bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if bgr is None:
-        raise FaceEncoderError("Invalid image file. Use JPG or PNG.")
-    return bgr
+class FaceEncoderError(Exception):
+    pass
 
 
 def _normalize_vector(vector: np.ndarray) -> np.ndarray:
@@ -31,37 +38,220 @@ def _normalize_vector(vector: np.ndarray) -> np.ndarray:
     return vector / norm
 
 
-def extract_face_encoding(image_bytes: bytes) -> list[float]:
-    bgr = image_bytes_to_bgr(image_bytes)
-    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-    faces = _face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80))
-
-    if len(faces) == 0:
-        raise FaceEncoderError("No face detected. Use a clear front-facing photo.")
-
-    if len(faces) > 1:
-        raise FaceEncoderError("Multiple faces detected. Only one person per image.")
-
-    x, y, w, h = faces[0]
-    face = gray[y : y + h, x : x + w]
-    face = cv2.resize(face, FACE_SIZE)
-    vector = _normalize_vector(face.astype(np.float64).flatten())
-    return vector.tolist()
+def image_bytes_to_bgr(image_bytes: bytes) -> np.ndarray:
+    arr = np.frombuffer(image_bytes, dtype=np.uint8)
+    bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise FaceEncoderError("Invalid image. Use JPG or PNG.")
+    return bgr
 
 
-def encoding_to_json(encoding: list[float]) -> str:
-    return json.dumps(encoding)
+def encoding_to_json(encoding: list[float], biometric_type: str = BIOMETRIC_FACE) -> str:
+    return json.dumps(
+        {
+            "type": biometric_type,
+            "vector": encoding,
+            "source": "insightface-buffalo_l",
+            "version": ENCODING_VERSION,
+        }
+    )
 
 
-def encoding_from_json(raw: str) -> np.ndarray:
-    return np.array(json.loads(raw), dtype=np.float64)
+def encoding_from_json(raw: str) -> tuple[str, np.ndarray, int]:
+    data = json.loads(raw)
+    if isinstance(data, dict) and "vector" in data:
+        bio_type = data.get("type", BIOMETRIC_FACE)
+        version = int(data.get("version", 1))
+        return bio_type, np.array(data["vector"], dtype=np.float64), version
+    return "legacy", np.array(data, dtype=np.float64), 1
 
 
-def face_distance(known: np.ndarray, unknown: np.ndarray) -> float:
+def face_similarity(known: np.ndarray, unknown: np.ndarray) -> float:
+    if known.shape != unknown.shape:
+        return 0.0
     known_n = _normalize_vector(known)
     unknown_n = _normalize_vector(unknown)
-    return float(1.0 - np.dot(known_n, unknown_n))
+    return float(max(0.0, np.dot(known_n, unknown_n)))
 
 
-def is_match(distance: float) -> bool:
-    return distance <= MATCH_THRESHOLD
+def passes_login_similarity(similarity: float) -> bool:
+    return similarity >= LOGIN_MIN_SIMILARITY
+
+
+def is_signup_duplicate(
+    best_similarity: float,
+    second_similarity: float | None,
+) -> bool:
+    if best_similarity < SIGNUP_DUPLICATE_MIN_SIMILARITY:
+        return False
+    if second_similarity is None:
+        return True
+    return (best_similarity - second_similarity) >= SIGNUP_DUPLICATE_MIN_GAP
+
+
+def _local_binary_pattern(gray: np.ndarray) -> np.ndarray:
+    center = gray[1:-1, 1:-1]
+    code = np.zeros(center.shape, dtype=np.uint8)
+    neighbors = (
+        gray[0:-2, 0:-2],
+        gray[0:-2, 1:-1],
+        gray[0:-2, 2:],
+        gray[1:-1, 2:],
+        gray[2:, 2:],
+        gray[2:, 1:-1],
+        gray[2:, 0:-2],
+        gray[1:-1, 0:-2],
+    )
+    for i, neighbor in enumerate(neighbors):
+        code |= (neighbor >= center).astype(np.uint8) << i
+    return code
+
+
+def _lbp_feature_vector(face_gray: np.ndarray) -> np.ndarray:
+    face = cv2.resize(face_gray, ENCODING_SIZE)
+    face = cv2.equalizeHist(face)
+    lbp = _local_binary_pattern(face)
+    grid_h, grid_w = LBP_GRID
+    cell_h = max(1, lbp.shape[0] // grid_h)
+    cell_w = max(1, lbp.shape[1] // grid_w)
+    parts: list[np.ndarray] = []
+    for row in range(grid_h):
+        for col in range(grid_w):
+            y1 = row * cell_h
+            y2 = (row + 1) * cell_h if row < grid_h - 1 else lbp.shape[0]
+            x1 = col * cell_w
+            x2 = (col + 1) * cell_w if col < grid_w - 1 else lbp.shape[1]
+            cell = lbp[y1:y2, x1:x2]
+            hist, _ = np.histogram(cell.ravel(), bins=LBP_BINS, range=(0, 256))
+            parts.append(hist.astype(np.float64))
+    return _normalize_vector(np.concatenate(parts))
+
+
+def _hog_feature_vector(face_gray: np.ndarray) -> np.ndarray:
+    face = cv2.resize(face_gray, ENCODING_SIZE)
+    face = cv2.equalizeHist(face)
+    features = _hog.compute(face)
+    if features is None:
+        raise FaceEncoderError("Could not extract face features.")
+    return _normalize_vector(features.flatten())
+
+
+def _crop_largest_face(gray: np.ndarray) -> np.ndarray:
+    faces = _face_cascade.detectMultiScale(
+        gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80)
+    )
+    if len(faces) == 0:
+        raise FaceEncoderError("No face detected. Face the camera clearly.")
+
+    x, y, w, h = max(faces, key=lambda f: int(f[2]) * int(f[3]))
+    pad = int(max(w, h) * 0.12)
+    y1 = max(0, y - pad)
+    y2 = min(gray.shape[0], y + h + pad)
+    x1 = max(0, x - pad)
+    x2 = min(gray.shape[1], x + w + pad)
+    face = gray[y1:y2, x1:x2]
+    if face.size == 0:
+        raise FaceEncoderError("Could not read face. Try again.")
+    return face
+
+
+def extract_face_encoding_v4(image_bytes: bytes) -> list[float]:
+    try:
+        return extract_normed_embedding(image_bytes).tolist()
+    except InsightFaceEngineError as exc:
+        raise FaceEncoderError(str(exc)) from exc
+
+
+def extract_face_encoding_v3(image_bytes: bytes) -> list[float]:
+    bgr = image_bytes_to_bgr(image_bytes)
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    gray = cv2.equalizeHist(gray)
+    face = _crop_largest_face(gray)
+    return _hog_feature_vector(face).tolist()
+
+
+def extract_face_encoding_v2(image_bytes: bytes) -> list[float]:
+    bgr = image_bytes_to_bgr(image_bytes)
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    gray = cv2.equalizeHist(gray)
+    face = _crop_largest_face(gray)
+    return _lbp_feature_vector(face).tolist()
+
+
+def extract_face_encoding_legacy(image_bytes: bytes) -> list[float]:
+    bgr = image_bytes_to_bgr(image_bytes)
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    gray = cv2.equalizeHist(gray)
+    face = _crop_largest_face(gray)
+    face = cv2.resize(face, ENCODING_SIZE)
+    return _normalize_vector(face.astype(np.float64).flatten()).tolist()
+
+
+def extract_face_encoding(image_bytes: bytes) -> list[float]:
+    return extract_face_encoding_v4(image_bytes)
+
+
+def extract_encoding_for_version(image_bytes: bytes, version: int) -> list[float]:
+    if version == ENCODING_VERSION:
+        return extract_face_encoding_v4(image_bytes)
+    if version == 3:
+        return extract_face_encoding_v3(image_bytes)
+    if version == 2:
+        return extract_face_encoding_v2(image_bytes)
+    return extract_face_encoding_legacy(image_bytes)
+
+
+def average_encodings(encodings: list[list[float]]) -> list[float]:
+    if not encodings:
+        raise FaceEncoderError("No face samples provided.")
+    stacked = np.array(encodings, dtype=np.float64)
+    return _normalize_vector(np.mean(stacked, axis=0)).tolist()
+
+
+def build_probes_from_samples(
+    samples: list[bytes],
+    needed_versions: set[int] | None = None,
+) -> dict[int, np.ndarray]:
+    versions = needed_versions or {ENCODING_VERSION}
+    probes: dict[int, np.ndarray] = {}
+
+    if ENCODING_VERSION in versions:
+        probes[ENCODING_VERSION] = np.array(
+            average_encodings([extract_face_encoding_v4(s) for s in samples]),
+            dtype=np.float64,
+        )
+    if 3 in versions:
+        probes[3] = np.array(
+            average_encodings([extract_face_encoding_v3(s) for s in samples]),
+            dtype=np.float64,
+        )
+    if 2 in versions:
+        probes[2] = np.array(
+            average_encodings([extract_face_encoding_v2(s) for s in samples]),
+            dtype=np.float64,
+        )
+    if 1 in versions:
+        probes[1] = np.array(
+            average_encodings([extract_face_encoding_legacy(s) for s in samples]),
+            dtype=np.float64,
+        )
+    return probes
+
+
+def extract_biometric_encoding(
+    biometric_type: str,
+    *,
+    encoding_raw: str | None = None,
+    image_bytes: bytes | None = None,
+) -> list[float]:
+    if image_bytes:
+        return extract_face_encoding(image_bytes)
+    raise FaceEncoderError("Camera image required.")
+
+
+def extract_eye_encoding(image_bytes: bytes) -> list[float]:
+    return extract_face_encoding(image_bytes)
+
+
+def extract_palm_encoding(image_bytes: bytes) -> list[float]:
+    return extract_face_encoding(image_bytes)

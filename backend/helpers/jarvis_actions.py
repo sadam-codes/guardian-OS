@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from helpers.jarvis_web import resolve_web_open, youtube_search_url
+from helpers.jarvis_web import google_search_url, looks_like_web_search, resolve_web_open, youtube_search_url
 from helpers.jarvis_windows import launch_windows_app
 from schemas.jarvis import JarvisIntent
 
@@ -62,7 +62,7 @@ def _action_date(_: JarvisIntent) -> JarvisActionResult:
 def _action_help(_: JarvisIntent) -> JarvisActionResult:
     return JarvisActionResult(
         True,
-        "I can open apps and websites, search YouTube, change volume, lock the PC, and take screenshots. "
+        "I can open apps and websites, search Google and YouTube, change volume, lock the PC, and take screenshots. "
         "I cannot click inside apps or control Netflix, games, etc. Say: open YouTube and play song NAME.",
         "help",
     )
@@ -93,10 +93,9 @@ def _action_cancel(_: JarvisIntent) -> JarvisActionResult:
 
 
 def _action_unknown(intent: JarvisIntent) -> JarvisActionResult:
-    raw = intent.slots.get("raw", "")
     return JarvisActionResult(
         False,
-        f"I didn't understand that{': ' + raw if raw else ''}. Say 'help' for examples.",
+        "I don't know that command. Say help for what I can do.",
         "unknown",
     )
 
@@ -115,13 +114,23 @@ def _action_open_app(intent: JarvisIntent) -> JarvisActionResult:
         webbrowser.open(url)
         return JarvisActionResult(True, f"Opening {label}.", "open_app", target_label=label)
 
+    if looks_like_web_search(raw):
+        webbrowser.open(google_search_url(raw))
+        return JarvisActionResult(
+            True,
+            f"Searching Google for {raw}.",
+            "web_search",
+            target_label=raw,
+        )
+
     ok, label = launch_windows_app(raw)
     if not ok:
+        webbrowser.open(google_search_url(raw))
         return JarvisActionResult(
-            False,
-            f"I couldn't find or open '{raw}'.",
-            "open_app",
-            target_label=label or raw,
+            True,
+            f"Searching Google for {raw}.",
+            "web_search",
+            target_label=raw,
         )
 
     return JarvisActionResult(True, f"Opening {label}.", "open_app", target_label=label)
@@ -145,9 +154,9 @@ def _action_web_search(intent: JarvisIntent) -> JarvisActionResult:
     query = intent.slots.get("query", "").strip()
     if not query:
         return JarvisActionResult(False, "What should I search for?", "web_search")
-    webbrowser.open(f"https://www.google.com/search?q={query.replace(' ', '+')}")
+    webbrowser.open(google_search_url(query))
     return JarvisActionResult(
-        True, f"Searching for {query}.", "web_search", target_label=query
+        True, f"Searching Google for {query}.", "web_search", target_label=query
     )
 
 
@@ -229,6 +238,22 @@ def _action_screenshot(_: JarvisIntent) -> JarvisActionResult:
     return JarvisActionResult(True, "Screenshot saved.", "screenshot")
 
 
+def _action_shutdown(_: JarvisIntent) -> JarvisActionResult:
+    blocked = _require_os()
+    if blocked:
+        return blocked
+    subprocess.run(["shutdown", "/s", "/t", "15"], check=False)
+    return JarvisActionResult(True, "Shutting down in 15 seconds.", "shutdown")
+
+
+def _action_restart(_: JarvisIntent) -> JarvisActionResult:
+    blocked = _require_os()
+    if blocked:
+        return blocked
+    subprocess.run(["shutdown", "/r", "/t", "15"], check=False)
+    return JarvisActionResult(True, "Restarting in 15 seconds.", "restart")
+
+
 _HANDLERS: dict[str, Callable[[JarvisIntent], JarvisActionResult]] = {
     "greet": _action_greet,
     "acknowledge": _action_acknowledge,
@@ -248,6 +273,8 @@ _HANDLERS: dict[str, Callable[[JarvisIntent], JarvisActionResult]] = {
     "volume_mute": _action_volume_mute,
     "minimize_all": _action_minimize_all,
     "screenshot": _action_screenshot,
+    "shutdown": _action_shutdown,
+    "restart": _action_restart,
     "unknown": _action_unknown,
 }
 

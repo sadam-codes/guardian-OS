@@ -75,6 +75,8 @@ def init_db() -> None:
                 "NOT NULL DEFAULT 'user'"
             )
         )
+        conn.execute(text("ALTER TABLE register DROP CONSTRAINT IF EXISTS register_name_key"))
+        conn.execute(text("DROP INDEX IF EXISTS ix_register_name"))
     logger.info("Database tables ensured")
 
 

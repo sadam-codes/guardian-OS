@@ -1,36 +1,44 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { captureFrameFromVideo } from '../helpers/captureFrame'
 
-const SCAN_MS = 1800
+const FACE_DETECT_MS = 120
 
 export default function LiveFaceScanner({
   enabled,
-  paused,
+  busy = false,
   onFrame,
-  status = 'scanning',
-  hint = 'Position your face in the frame',
   autoStart = false,
   onCameraReadyChange,
+  scanIntervalMs = 400,
+  captureQuality = 0.88,
 }) {
   const videoRef = useRef(null)
+  const containerRef = useRef(null)
   const streamRef = useRef(null)
   const scanningRef = useRef(false)
+  const lastScanRef = useRef(0)
+  const faceDetectorRef = useRef(null)
+  const [faceBox, setFaceBox] = useState(null)
+  const [ready, setReady] = useState(false)
   const [cameraRequested, setCameraRequested] = useState(autoStart)
   const [cameraReady, setCameraReady] = useState(false)
   const [cameraError, setCameraError] = useState('')
+  const [useNativeDetector, setUseNativeDetector] = useState(false)
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
     if (videoRef.current) videoRef.current.srcObject = null
     setCameraReady(false)
+    setReady(false)
+    setFaceBox(null)
   }, [])
 
   const startCamera = useCallback(async () => {
     setCameraError('')
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false,
       })
       streamRef.current = stream
@@ -40,7 +48,7 @@ export default function LiveFaceScanner({
         setCameraReady(true)
       }
     } catch {
-      setCameraError('Camera access is required. Please allow webcam permissions in your browser.')
+      setCameraError('Camera access is required. Please allow webcam permissions.')
       setCameraReady(false)
     }
   }, [])
@@ -51,9 +59,7 @@ export default function LiveFaceScanner({
   }, [])
 
   useEffect(() => {
-    if (autoStart) {
-      setCameraRequested(true)
-    }
+    if (autoStart) setCameraRequested(true)
   }, [autoStart])
 
   useEffect(() => {
@@ -66,26 +72,102 @@ export default function LiveFaceScanner({
   }, [cameraRequested, startCamera, stopCamera])
 
   useEffect(() => {
-    if (!enabled) {
-      stopCamera()
-      if (!autoStart) {
-        setCameraRequested(false)
-      }
-    }
-  }, [enabled, autoStart, stopCamera])
+    if (!enabled) stopCamera()
+  }, [enabled, stopCamera])
 
   useEffect(() => {
     onCameraReadyChange?.(cameraReady)
   }, [cameraReady, onCameraReadyChange])
 
   useEffect(() => {
-    if (!enabled || paused || !cameraReady) return
+    if (typeof window === 'undefined' || !('FaceDetector' in window)) return undefined
+    let cancelled = false
+    try {
+      faceDetectorRef.current = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 })
+      if (!cancelled) setUseNativeDetector(true)
+    } catch {
+      setUseNativeDetector(false)
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!enabled || busy || !cameraReady) {
+      setReady(false)
+      setFaceBox(null)
+      return undefined
+    }
+
+    let running = true
+    let lastDetect = 0
+
+    const detectLoop = (now) => {
+      if (!running) return
+      const video = videoRef.current
+      const container = containerRef.current
+      if (!video || !container || video.readyState < 2) {
+        requestAnimationFrame(detectLoop)
+        return
+      }
+
+      if (now - lastDetect >= FACE_DETECT_MS) {
+        lastDetect = now
+
+        if (useNativeDetector && faceDetectorRef.current) {
+          faceDetectorRef.current
+            .detect(video)
+            .then((faces) => {
+              if (!running) return
+              if (faces?.length) {
+                setReady(true)
+                const b = faces[0].boundingBox
+                const scaleX = container.clientWidth / video.videoWidth
+                const scaleY = container.clientHeight / video.videoHeight
+                setFaceBox({
+                  x: b.x * scaleX,
+                  y: b.y * scaleY,
+                  w: b.width * scaleX,
+                  h: b.height * scaleY,
+                })
+              } else {
+                setReady(false)
+                setFaceBox(null)
+              }
+            })
+            .catch(() => {
+              if (running) setReady(true)
+            })
+        } else {
+          setReady(true)
+        }
+      }
+
+      requestAnimationFrame(detectLoop)
+    }
+
+    const id = requestAnimationFrame(detectLoop)
+    return () => {
+      running = false
+      cancelAnimationFrame(id)
+      setReady(false)
+      setFaceBox(null)
+    }
+  }, [enabled, busy, cameraReady, useNativeDetector])
+
+  useEffect(() => {
+    if (!enabled || busy || !cameraReady || !ready) return undefined
 
     const tick = async () => {
-      if (scanningRef.current || paused || !videoRef.current) return
-      const file = await captureFrameFromVideo(videoRef.current)
+      if (scanningRef.current || busy || !videoRef.current) return
+      const now = Date.now()
+      if (now - lastScanRef.current < scanIntervalMs) return
+
+      const file = await captureFrameFromVideo(videoRef.current, captureQuality)
       if (!file) return
 
+      lastScanRef.current = now
       scanningRef.current = true
       try {
         await onFrame(file)
@@ -94,25 +176,28 @@ export default function LiveFaceScanner({
       }
     }
 
-    const id = setInterval(tick, SCAN_MS)
+    const id = setInterval(tick, scanIntervalMs)
     tick()
     return () => clearInterval(id)
-  }, [enabled, paused, cameraReady, onFrame])
+  }, [enabled, busy, cameraReady, ready, onFrame, scanIntervalMs, captureQuality])
 
-  const ringClass =
-    status === 'recognized'
-      ? 'border-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.25)]'
-      : status === 'error'
-        ? 'border-red-400'
-        : 'border-indigo-500/80 shadow-[0_0_0_4px_rgba(99,102,241,0.15)]'
-
-  const showOpenButton = !cameraRequested && !cameraError
+  const showOpen = !cameraRequested && !cameraError
   const showLoading = cameraRequested && !cameraReady && !cameraError
+
+  let statusLabel = 'Looking for face…'
+  let statusColor = 'bg-amber-400 animate-pulse'
+  if (busy) {
+    statusLabel = 'Verifying…'
+    statusColor = 'bg-sky-400 animate-pulse'
+  } else if (ready) {
+    statusLabel = 'Scanning…'
+    statusColor = 'bg-emerald-400'
+  }
 
   return (
     <div className="w-full">
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-900 shadow-lg">
-        <div className="relative">
+        <div ref={containerRef} className="relative">
           <video
             ref={videoRef}
             playsInline
@@ -120,19 +205,17 @@ export default function LiveFaceScanner({
             className={`aspect-[4/3] w-full object-cover ${cameraReady ? 'block' : 'opacity-0'}`}
           />
 
-          {showOpenButton && (
+          {showOpen && (
             <div className="absolute inset-0 flex aspect-[4/3] flex-col items-center justify-center gap-4 bg-slate-800 p-6 text-center">
-              <CameraIcon className="h-12 w-12 text-slate-400" />
+              <FaceIcon className="h-12 w-12 text-violet-400" />
               <p className="max-w-xs text-sm text-slate-300">
-                {enabled
-                  ? 'Open the camera when you are ready to scan your face.'
-                  : 'Complete the form above, then open the camera.'}
+                {enabled ? 'Open the camera to scan your face.' : 'Enter your name first.'}
               </p>
               <button
                 type="button"
                 onClick={openCamera}
                 disabled={!enabled}
-                className="cursor-pointer rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="cursor-pointer rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
               >
                 Open camera
               </button>
@@ -140,8 +223,7 @@ export default function LiveFaceScanner({
           )}
 
           {showLoading && (
-            <div className="absolute inset-0 flex aspect-[4/3] flex-col items-center justify-center gap-3 bg-slate-800 text-white">
-              <Spinner />
+            <div className="absolute inset-0 flex aspect-[4/3] items-center justify-center bg-slate-800 text-white">
               <span className="text-sm text-slate-300">Starting camera…</span>
             </div>
           )}
@@ -152,55 +234,38 @@ export default function LiveFaceScanner({
               <button
                 type="button"
                 onClick={openCamera}
-                className="cursor-pointer rounded-xl border border-slate-500 bg-slate-700 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-600"
+                className="cursor-pointer rounded-xl border border-slate-500 bg-slate-700 px-5 py-2.5 text-sm text-white"
               >
                 Try again
               </button>
             </div>
           )}
 
-          {cameraReady && (
+          {cameraReady && enabled && (
             <>
-              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-slate-900/50 via-transparent to-slate-900/20" />
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              {faceBox && !busy && (
                 <div
-                  className={`h-52 w-52 rounded-full border-[3px] ${ringClass} transition-all duration-500`}
+                  className="pointer-events-none absolute rounded-lg border-2 border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.8)]"
+                  style={{ left: faceBox.x, top: faceBox.y, width: faceBox.w, height: faceBox.h }}
                 />
-              </div>
-              {enabled && !paused && status === 'scanning' && (
-                <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/50 px-3 py-1.5 text-xs text-white backdrop-blur-sm">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-400" />
-                  Scanning…
-                </div>
               )}
+              <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white">
+                <span className={`h-2 w-2 rounded-full ${statusColor}`} />
+                {statusLabel}
+              </div>
             </>
           )}
         </div>
       </div>
-
-      <p className="mt-3 text-center text-sm text-slate-500">{hint}</p>
     </div>
   )
 }
 
-function CameraIcon({ className }) {
+function FaceIcon({ className }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a41.763 41.763 0 00-1.134-.175 2.31 2.31 0 00-1.64-1.055 2.31 2.31 0 00-1.64 1.055 41.763 41.763 0 00-1.134.175C4.749 7.58 4 8.507 4 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169z"
-      />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0" />
     </svg>
   )
 }
 
-function Spinner() {
-  return (
-    <svg className="h-8 w-8 animate-spin text-indigo-400" viewBox="0 0 24 24" fill="none">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-    </svg>
-  )
-}

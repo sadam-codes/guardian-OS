@@ -55,7 +55,8 @@ export default function UserManagement({
               <tr key={u.id}>
                 <td className="py-2.5 pr-2">
                   <span className="font-medium text-slate-800">{u.name}</span>
-                  {actorName === u.name && (
+                  <span className="ml-1 text-xs text-slate-400">#{u.id}</span>
+                  {currentUserId === u.id && (
                     <span className="ml-1 text-xs text-slate-400">(you)</span>
                   )}
                 </td>
@@ -75,9 +76,9 @@ export default function UserManagement({
                   <button
                     type="button"
                     onClick={() => setDeleting(u)}
-                    disabled={actorName === u.name}
-                    aria-label={actorName === u.name ? 'Cannot delete your own account' : `Delete ${u.name}`}
-                    title={actorName === u.name ? 'Cannot delete your own account' : 'Delete user'}
+                    disabled={currentUserId === u.id}
+                    aria-label={currentUserId === u.id ? 'Cannot delete your own account' : `Delete ${u.name}`}
+                    title={currentUserId === u.id ? 'Cannot delete your own account' : 'Delete user'}
                     className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <TrashIcon className="h-5 w-5" />
@@ -100,7 +101,7 @@ export default function UserManagement({
           onConfirm={async () => {
             setBusy(true)
             try {
-              const data = await deleteUser(deleting.id, actorRole, actorName)
+              const data = await deleteUser(deleting.id, actorRole, currentUserId)
               toast.success(data.message)
               setDeleting(null)
               await onRefresh()

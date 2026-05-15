@@ -2,6 +2,7 @@ import json
 import os
 import re
 
+from helpers.jarvis_web import looks_like_web_search
 from schemas.jarvis import JarvisIntent
 
 _RULES: list[tuple[re.Pattern[str], str, float, dict[str, str]]] = []
@@ -51,21 +52,36 @@ _rule(r"open (?:the )?(?P<app>[\w\s]+?)(?:\s+app)?$", "open_app", 0.9, app="app"
 _rule(r"launch (?:the )?(?P<app>[\w\s]+)$", "open_app", 0.88, app="app")
 _rule(r"(?:go to|open) (?P<url>https?://\S+)", "open_url", 0.95, url="url")
 _rule(r"open (?:the )?(?:website|site|page) (?P<query>.+)", "open_url_search", 0.85, query="query")
+_rule(r"search (?:on )?(?:the )?(?:web|internet|online|google)(?:\s+for)?\s+(?P<query>.+)", "web_search", 0.94, query="query")
 _rule(r"search (?:for )?(?P<query>.+)", "web_search", 0.9, query="query")
-_rule(r"google (?P<query>.+)", "web_search", 0.88, query="query")
+_rule(r"(?:google|googling)\s+(?:for\s+)?(?P<query>.+)", "web_search", 0.9, query="query")
+_rule(r"(?:look\s*up|lookup|find|browse)\s+(?P<query>.+)\s+(?:on\s+)?(?:the\s+)?(?:web|internet|online|google)", "web_search", 0.9, query="query")
+_rule(r"(?:look\s*up|lookup|find)\s+(?P<query>.+)", "web_search", 0.86, query="query")
 _rule(r"open (?:my )?(?P<folder>desktop|documents|downloads|home|pictures)", "open_folder", 0.9, folder="folder")
 _rule(r"minimize (?:all )?windows|show desktop", "minimize_all", 0.9)
 _rule(r"(?:take )?screenshot|capture screen", "screenshot", 0.9)
-_rule(r"shutdown|shut down (?:the )?(?:pc|computer)", "shutdown", 0.85)
-_rule(r"restart (?:the )?(?:pc|computer)|reboot", "restart", 0.85)
+_rule(
+    r"shut\s*down|shut\s+down\s+(?:my\s+)?(?:the\s+)?(?:pc|computer|laptop|system)|power\s+off",
+    "shutdown",
+    0.92,
+)
+_rule(r"restart\s+(?:my\s+)?(?:the\s+)?(?:pc|computer|laptop|system)|reboot", "restart", 0.92)
 _rule(r"cancel|stop listening|never mind", "cancel", 0.9)
 _rule(r"help|what can you do|capabilities", "help", 0.95)
 
 
 def _parse_with_llm(text: str) -> JarvisIntent | None:
-    use_llm = os.getenv("JARVIS_USE_LLM", "false").lower() in ("1", "true", "yes")
+    use_llm = os.getenv("JARVIS_USE_LLM", "true").lower() in ("1", "true", "yes")
+    if not use_llm:
+        return None
+
+    from helpers.jarvis_groq import groq_enabled, parse_intent_with_groq
+
+    if groq_enabled():
+        return parse_intent_with_groq(text)
+
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not use_llm or not api_key:
+    if not api_key:
         return None
     try:
         from openai import OpenAI  # type: ignore
@@ -140,7 +156,19 @@ def parse_jarvis_intent(text: str) -> JarvisIntent:
                     confidence=0.85,
                     slots={"query": song.group(1).strip()},
                 )
+        if looks_like_web_search(target):
+            return JarvisIntent(intent="web_search", confidence=0.85, slots={"query": target})
         return JarvisIntent(intent="open_app", confidence=0.7, slots={"app": target})
+
+    if re.search(r"\b(search|google|look\s*up|find)\b", lower) and not lower.startswith("open "):
+        query = re.sub(
+            r"^(?:please\s+)?(?:can you\s+)?(?:search(?:\s+for)?|google|look\s*up|find)\s+",
+            "",
+            clean,
+            flags=re.I,
+        ).strip()
+        if query:
+            return JarvisIntent(intent="web_search", confidence=0.75, slots={"query": query})
 
     if re.search(r"\b(volume|sound)\b", lower) and re.search(
         r"\b(up|down|higher|lower|louder|quieter|increase|decrease|mute)\b", lower

@@ -1,10 +1,12 @@
 import os
 
 from helpers.jarvis_actions import JarvisActionResult, execute_jarvis_intent
+from helpers.jarvis_groq import generate_spoken_reply, groq_enabled
 from helpers.jarvis_intent import parse_jarvis_intent
 from schemas.jarvis import JarvisCommandResponse
 
 ASSISTANT_NAME = os.getenv("JARVIS_NAME", "Guardian")
+USE_GROQ_REPLIES = os.getenv("JARVIS_GROQ_REPLIES", "false").lower() in ("1", "true", "yes")
 
 
 def _first_name(user_name: str | None) -> str | None:
@@ -33,7 +35,7 @@ def _personalize_message(
     templates: dict[str, str] = {
         "open_app": f"Okay {name}, opening {label or 'that'}." if label else f"Okay {name}, {base.lower()}.",
         "open_url": f"Okay {name}, opening that link.",
-        "web_search": f"Okay {name}, searching for {label}." if label else f"Okay {name}, searching now.",
+        "web_search": f"Okay {name}, searching Google for {label}." if label else f"Okay {name}, opening Google search.",
         "youtube_search": f"Okay {name}, opening YouTube to play {label}." if label else f"Okay {name}, opening YouTube.",
         "open_folder": f"Okay {name}, opening your {label} folder." if label else f"Okay {name}, opening that folder.",
         "lock": f"Okay {name}, locking your computer.",
@@ -48,6 +50,9 @@ def _personalize_message(
         "help": f"Sure {name}. Try: open Chrome, open Windows settings, open VS Code, lock computer, or volume up.",
         "acknowledge": f"Got it, {name}.",
         "cancel": f"Alright {name}, cancelled.",
+        "shutdown": f"Okay {name}, shutting down in 15 seconds.",
+        "restart": f"Okay {name}, restarting in 15 seconds.",
+        "unknown": f"{name}, I don't know that command. Say help for examples.",
     }
 
     if intent in templates:
@@ -63,6 +68,18 @@ def process_jarvis_command(text: str, user_name: str | None = None) -> JarvisCom
 
     if intent.intent == "greet" and not _first_name(user_name):
         message = message.replace("How can I help", f"I'm {ASSISTANT_NAME}. How can I help")
+
+    if USE_GROQ_REPLIES and groq_enabled() and result.success:
+        spoken = generate_spoken_reply(
+            user_text=text,
+            user_name=user_name,
+            intent=intent.intent,
+            action_success=result.success,
+            action_message=result.message,
+            assistant_name=ASSISTANT_NAME,
+        )
+        if spoken:
+            message = spoken
 
     return JarvisCommandResponse(
         success=result.success,

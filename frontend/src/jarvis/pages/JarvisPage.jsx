@@ -46,12 +46,8 @@ export default function JarvisPage() {
           <UserSidebar active="jarvis" />
         )}
 
-        <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
-          <div className="mx-auto max-w-2xl">
-            <div className="mb-6 lg:hidden">
-              <h2 className="text-xl font-bold text-slate-900">Voice assistant</h2>
-              <p className="mt-1 text-sm text-slate-500">Speak or type commands to control your PC.</p>
-            </div>
+        <main className="flex-1 overflow-auto p-4 sm:p-5 lg:p-6">
+          <div className="mx-auto w-full max-w-4xl">
             <VoiceConsole userName={session.name} />
           </div>
         </main>
