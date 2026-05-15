@@ -77,6 +77,11 @@ def init_db() -> None:
         )
         conn.execute(text("ALTER TABLE register DROP CONSTRAINT IF EXISTS register_name_key"))
         conn.execute(text("DROP INDEX IF EXISTS ix_register_name"))
+        conn.execute(
+            text(
+                "ALTER TABLE register ADD COLUMN IF NOT EXISTS eye_encoding TEXT NOT NULL DEFAULT ''"
+            )
+        )
     logger.info("Database tables ensured")
 
 

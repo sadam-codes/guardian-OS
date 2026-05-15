@@ -28,7 +28,9 @@ export default function HomePage() {
   const loginBusyRef = useRef(false)
   const loginAttemptRef = useRef(0)
   const signupSamplesRef = useRef([])
+  const signupEyeSamplesRef = useRef([])
   const loginSamplesRef = useRef([])
+  const loginEyeSamplesRef = useRef([])
   const [signupBlocked, setSignupBlocked] = useState(false)
   const toast = useToast()
 
@@ -41,7 +43,9 @@ export default function HomePage() {
     loginBusyRef.current = false
     setIsProcessing(false)
     signupSamplesRef.current = []
+    signupEyeSamplesRef.current = []
     loginSamplesRef.current = []
+    loginEyeSamplesRef.current = []
     setScanMessage(faceIdleMessage(nextMode ?? mode))
   }, [mode])
 
@@ -63,10 +67,11 @@ export default function HomePage() {
   )
 
   const handleLoginFrame = useCallback(
-    async (file) => {
+    async ({ file, eyeEncoding }) => {
       if (loginBusyRef.current) return
 
       loginSamplesRef.current.push(file)
+      loginEyeSamplesRef.current.push(eyeEncoding)
       const count = loginSamplesRef.current.length
       if (count < LOGIN_SAMPLE_COUNT) {
         setScanMessage(faceProgressMessage(count, LOGIN_SAMPLE_COUNT))
@@ -79,7 +84,7 @@ export default function HomePage() {
       setScanMessage(faceVerifyingMessage())
 
       try {
-        const data = await faceLogin(loginSamplesRef.current)
+        const data = await faceLogin(loginSamplesRef.current, loginEyeSamplesRef.current)
         if (attempt !== loginAttemptRef.current) return
 
         loginBusyRef.current = false
@@ -93,6 +98,7 @@ export default function HomePage() {
         if (attempt !== loginAttemptRef.current) return
 
         loginSamplesRef.current = []
+        loginEyeSamplesRef.current = []
         loginBusyRef.current = false
         setIsProcessing(false)
         setScanMessage(parseFaceAuthError(err.message, 'login'))
@@ -102,10 +108,11 @@ export default function HomePage() {
   )
 
   const handleSignupFrame = useCallback(
-    async (file) => {
+    async ({ file, eyeEncoding }) => {
       if (!name.trim() || signupDoneRef.current || loginBusyRef.current) return
 
       signupSamplesRef.current.push(file)
+      signupEyeSamplesRef.current.push(eyeEncoding)
       const count = signupSamplesRef.current.length
       if (count < SIGNUP_SAMPLE_COUNT) {
         setScanMessage(faceProgressMessage(count, SIGNUP_SAMPLE_COUNT))
@@ -118,7 +125,7 @@ export default function HomePage() {
       setScanMessage(faceCreatingAccountMessage())
 
       try {
-        const data = await faceSignup(name, signupSamplesRef.current, 'user', null)
+        const data = await faceSignup(name, signupSamplesRef.current, signupEyeSamplesRef.current, 'user', null)
         if (attempt !== loginAttemptRef.current) return
 
         signupDoneRef.current = true
@@ -133,6 +140,7 @@ export default function HomePage() {
         if (attempt !== loginAttemptRef.current) return
 
         signupSamplesRef.current = []
+        signupEyeSamplesRef.current = []
         loginBusyRef.current = false
         setIsProcessing(false)
         const parsed = parseFaceAuthError(err.message, 'signup')
@@ -155,7 +163,7 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
-      <PageHeader title="Guardian OS" subtitle="Face recognition login" />
+      <PageHeader title="Guardian OS" subtitle="Face & eye verification" />
 
       <main className="mx-auto max-w-xl px-4 py-8 sm:px-6 sm:py-10">
         <div className="mb-6 text-center">

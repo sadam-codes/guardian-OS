@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 from sqlalchemy.orm import Session
 
@@ -6,12 +8,17 @@ from helpers.face_encoder import (
     ENCODING_VERSION,
     FaceEncoderError,
     average_encodings,
+    average_eye_encodings,
     build_probes_from_samples,
     encoding_from_json,
     encoding_to_json,
     extract_face_encoding,
+    eye_encoding_from_json,
+    eye_encoding_to_json,
     face_similarity,
     is_signup_duplicate,
+    is_signup_duplicate_eye,
+    passes_login_eye_similarity,
     passes_login_similarity,
 )
 from helpers.roles import ROLE_ADMIN, ROLE_USER, VALID_ROLES
@@ -23,6 +30,31 @@ class FaceAuthError(Exception):
         self.message = message
         self.status_code = status_code
         super().__init__(message)
+
+
+def _parse_eye_vectors_json(raw: str | None) -> list[list[float]]:
+    if raw is None or not str(raw).strip():
+        raise FaceAuthError("Eye biometric data is required.", 400)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise FaceAuthError("Invalid eye biometric payload.", 400) from exc
+    if not isinstance(data, list) or len(data) == 0:
+        raise FaceAuthError("Eye biometric data is required.", 400)
+    out: list[list[float]] = []
+    for item in data:
+        if not isinstance(item, list) or len(item) < 8:
+            raise FaceAuthError("Invalid eye sample in payload.", 400)
+        try:
+            out.append([float(x) for x in item])
+        except (TypeError, ValueError) as exc:
+            raise FaceAuthError("Invalid eye sample values.", 400) from exc
+    return out
+
+
+def _has_stored_eye(user: Register) -> bool:
+    _, vec, _ = eye_encoding_from_json(user.eye_encoding)
+    return vec.size > 0
 
 
 def _versions_in_db(db: Session) -> set[int]:
@@ -85,6 +117,56 @@ def _check_duplicate_face(db: Session, probes: dict[int, np.ndarray]) -> None:
         )
 
 
+def _check_duplicate_eye(db: Session, eye_probe: np.ndarray) -> None:
+    scores: list[tuple[Register, float]] = []
+    for user in db.query(Register).all():
+        _, known, _ = eye_encoding_from_json(user.eye_encoding)
+        if known.size == 0:
+            continue
+        if known.shape != eye_probe.shape:
+            continue
+        sim = face_similarity(known, eye_probe)
+        if sim > 0:
+            scores.append((user, sim))
+    scores.sort(key=lambda item: item[1], reverse=True)
+    if not scores:
+        return
+    best_user, best_sim = scores[0]
+    second_sim = scores[1][1] if len(scores) > 1 else None
+    if is_signup_duplicate_eye(best_sim, second_sim):
+        raise FaceAuthError(
+            f"This eye pattern is already registered as '{best_user.name}'. Sign in instead.",
+            409,
+        )
+
+
+def _verify_login_eyes(db: Session, user: Register, eye_vectors: list[list[float]]) -> None:
+    try:
+        probe_list = average_eye_encodings(eye_vectors)
+    except FaceEncoderError as exc:
+        raise FaceAuthError(str(exc)) from exc
+    probe = np.array(probe_list, dtype=np.float64)
+
+    if _has_stored_eye(user):
+        _, stored, _ = eye_encoding_from_json(user.eye_encoding)
+        if stored.shape != probe.shape:
+            raise FaceAuthError(
+                "Stored eye template is incompatible. Ask an admin to update your profile.",
+                401,
+            )
+        sim = face_similarity(stored, probe)
+        if not passes_login_eye_similarity(sim):
+            raise FaceAuthError(
+                "Face matched but eyes did not verify. Look straight at the camera with both eyes visible.",
+                401,
+            )
+        return
+
+    user.eye_encoding = eye_encoding_to_json(probe_list)
+    db.commit()
+    db.refresh(user)
+
+
 def _resolve_signup_role(db: Session, requested_role: str, actor_role: str | None) -> str:
     role = (requested_role or ROLE_USER).strip().lower()
     if role not in VALID_ROLES:
@@ -101,6 +183,8 @@ def signup_face(
     name: str,
     image_bytes: bytes | None = None,
     image_bytes_list: list[bytes] | None = None,
+    *,
+    eye_encodings_json: str | None = None,
     role: str = ROLE_USER,
     actor_role: str | None = None,
     biometric_type: str = BIOMETRIC_FACE,
@@ -115,8 +199,20 @@ def signup_face(
     if not samples:
         raise FaceAuthError("Camera image required.")
 
+    eye_vectors = _parse_eye_vectors_json(eye_encodings_json)
+    if len(eye_vectors) != len(samples):
+        raise FaceAuthError("Eye samples must match the number of face frames.", 400)
+
     probes = _probes_from_samples(db, samples)
     _check_duplicate_face(db, probes)
+
+    try:
+        eye_avg_list = average_eye_encodings(eye_vectors)
+        eye_probe = np.array(eye_avg_list, dtype=np.float64)
+    except FaceEncoderError as exc:
+        raise FaceAuthError(str(exc)) from exc
+
+    _check_duplicate_eye(db, eye_probe)
 
     user = Register(
         name=clean_name,
@@ -124,6 +220,7 @@ def signup_face(
             average_encodings([extract_face_encoding(s) for s in samples]),
             BIOMETRIC_FACE,
         ),
+        eye_encoding=eye_encoding_to_json(eye_avg_list),
         role=_resolve_signup_role(db, role, actor_role),
     )
     db.add(user)
@@ -136,13 +233,19 @@ def login_face(
     db: Session,
     image_bytes: bytes | None = None,
     image_bytes_list: list[bytes] | None = None,
+    *,
+    eye_encodings_json: str | None = None,
     biometric_type: str = BIOMETRIC_FACE,
 ) -> Register:
     samples = list(image_bytes_list or [])
     if image_bytes is not None:
         samples.insert(0, image_bytes)
     if not samples:
-        raise FaceAuthError("Camera image required.")
+        raise FaceAuthError("Camera image required.", 400)
+
+    eye_vectors = _parse_eye_vectors_json(eye_encodings_json)
+    if len(eye_vectors) != len(samples):
+        raise FaceAuthError("Eye samples must match the number of face frames.", 400)
 
     if not db.query(Register).count():
         raise FaceAuthError("No registered users. Sign up first.", 404)
@@ -154,6 +257,8 @@ def login_face(
 
     scores = _score_all_users(db, probes)
     best_user, _, best_version = _resolve_login(scores)
+
+    _verify_login_eyes(db, best_user, eye_vectors)
 
     if best_version != ENCODING_VERSION:
         try:

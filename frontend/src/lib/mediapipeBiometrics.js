@@ -230,7 +230,7 @@ export function mapNormToDisplay(norm, video, container) {
   return { x: px * scale + offsetX, y: py * scale + offsetY }
 }
 
-function eyeCenter(landmarks, indices) {
+export function eyeCenter(landmarks, indices) {
   let x = 0
   let y = 0
   for (const i of indices) {
@@ -239,6 +239,84 @@ function eyeCenter(landmarks, indices) {
   }
   const n = indices.length
   return { x: x / n, y: y / n }
+}
+
+/** Face bbox + eye dots + encoding for Guardian scanner (single FaceLandmarker pass). */
+export async function detectFaceFrame(video, container, timestamp) {
+  const empty = {
+    captureReady: false,
+    faceBox: null,
+    eyeDots: [],
+    eyeEncoding: null,
+    modelReady: false,
+  }
+
+  if (!video?.videoWidth || !container) {
+    return empty
+  }
+
+  try {
+    const { faceLandmarker: faceLm } = await ensureModels()
+    const result = faceLm.detectForVideo(video, timestamp)
+    const face = result.faceLandmarks?.[0]
+    if (!face) {
+      return { ...empty, modelReady: true }
+    }
+
+    const faceBox = landmarkBoundingBoxDisplay(face, video, container)
+    const left = eyeCenter(face, LEFT_EYE)
+    const right = eyeCenter(face, RIGHT_EYE)
+    const leftPx = mapNormToDisplay(left, video, container)
+    const rightPx = mapNormToDisplay(right, video, container)
+
+    const eyeDots = []
+    if (leftPx) eyeDots.push({ ...leftPx, side: 'left' })
+    if (rightPx) eyeDots.push({ ...rightPx, side: 'right' })
+
+    const eyesOk = Boolean(leftPx && rightPx && faceBox)
+    const eyeEncoding = eyesOk ? buildEncoding(BIOMETRIC_EYE, face) : null
+
+    return {
+      captureReady: Boolean(eyesOk),
+      faceBox,
+      eyeDots,
+      eyeEncoding,
+      modelReady: true,
+    }
+  } catch {
+    return { ...empty, modelReady: false }
+  }
+}
+
+function landmarkBoundingBoxDisplay(face, video, container) {
+  let minX = 1
+  let maxX = 0
+  let minY = 1
+  let maxY = 0
+  for (const p of face) {
+    minX = Math.min(minX, p.x)
+    maxX = Math.max(maxX, p.x)
+    minY = Math.min(minY, p.y)
+    maxY = Math.max(maxY, p.y)
+  }
+  const bw = maxX - minX
+  const bh = maxY - minY
+  const pad = Math.max(bw, bh, 1e-6) * 0.08
+  minX = Math.max(0, minX - pad)
+  maxX = Math.min(1, maxX + pad)
+  minY = Math.max(0, minY - pad)
+  maxY = Math.min(1, maxY + pad)
+
+  const tl = mapNormToDisplay({ x: minX, y: minY }, video, container)
+  const br = mapNormToDisplay({ x: maxX, y: maxY }, video, container)
+  if (!tl || !br) return null
+
+  const x = Math.min(tl.x, br.x)
+  const y = Math.min(tl.y, br.y)
+  const w = Math.abs(br.x - tl.x)
+  const h = Math.abs(br.y - tl.y)
+  if (w < 8 || h < 8) return null
+  return { x, y, w, h }
 }
 
 export async function detectBiometric(video, container, biometricType, timestamp) {

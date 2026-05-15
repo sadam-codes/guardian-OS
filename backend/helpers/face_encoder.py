@@ -9,12 +9,19 @@ from helpers.insightface_engine import (
 )
 
 BIOMETRIC_FACE = "face"
+BIOMETRIC_EYE = "eye"
 ENCODING_VERSION = 4
+EYE_ENCODING_VERSION = 1
 
 # ArcFace cosine similarity on L2-normalized 512-d vectors
 LOGIN_MIN_SIMILARITY = 0.40
 SIGNUP_DUPLICATE_MIN_SIMILARITY = 0.55
 SIGNUP_DUPLICATE_MIN_GAP = 0.08
+
+# MediaPipe landmark eye identity (normalized client vector)
+LOGIN_MIN_EYE_SIMILARITY = 0.82
+SIGNUP_DUPLICATE_EYE_MIN_SIMILARITY = 0.92
+SIGNUP_DUPLICATE_EYE_MIN_GAP = 0.06
 
 ENCODING_SIZE = (128, 128)
 LBP_GRID = (4, 4)
@@ -76,6 +83,44 @@ def face_similarity(known: np.ndarray, unknown: np.ndarray) -> float:
 
 def passes_login_similarity(similarity: float) -> bool:
     return similarity >= LOGIN_MIN_SIMILARITY
+
+
+def passes_login_eye_similarity(similarity: float) -> bool:
+    return similarity >= LOGIN_MIN_EYE_SIMILARITY
+
+
+def eye_encoding_to_json(encoding: list[float]) -> str:
+    return json.dumps(
+        {
+            "type": BIOMETRIC_EYE,
+            "vector": encoding,
+            "source": "mediapipe-face-landmarks",
+            "version": EYE_ENCODING_VERSION,
+        }
+    )
+
+
+def eye_encoding_from_json(raw: str) -> tuple[str, np.ndarray, int]:
+    if not raw or not str(raw).strip():
+        return BIOMETRIC_EYE, np.array([], dtype=np.float64), EYE_ENCODING_VERSION
+    data = json.loads(raw)
+    if isinstance(data, dict) and "vector" in data:
+        bio_type = data.get("type", BIOMETRIC_EYE)
+        version = int(data.get("version", EYE_ENCODING_VERSION))
+        vec = np.array(data["vector"], dtype=np.float64)
+        return bio_type, vec, version
+    return BIOMETRIC_EYE, np.array([], dtype=np.float64), EYE_ENCODING_VERSION
+
+
+def is_signup_duplicate_eye(
+    best_similarity: float,
+    second_similarity: float | None,
+) -> bool:
+    if best_similarity < SIGNUP_DUPLICATE_EYE_MIN_SIMILARITY:
+        return False
+    if second_similarity is None:
+        return True
+    return (best_similarity - second_similarity) >= SIGNUP_DUPLICATE_EYE_MIN_GAP
 
 
 def is_signup_duplicate(
@@ -208,6 +253,16 @@ def average_encodings(encodings: list[list[float]]) -> list[float]:
     return _normalize_vector(np.mean(stacked, axis=0)).tolist()
 
 
+def average_eye_encodings(vectors: list[list[float]]) -> list[float]:
+    if not vectors:
+        raise FaceEncoderError("No eye samples provided.")
+    dim = len(vectors[0])
+    if any(len(v) != dim for v in vectors):
+        raise FaceEncoderError("Eye samples have inconsistent dimensions.")
+    stacked = np.array(vectors, dtype=np.float64)
+    return _normalize_vector(np.mean(stacked, axis=0)).tolist()
+
+
 def build_probes_from_samples(
     samples: list[bytes],
     needed_versions: set[int] | None = None,
@@ -250,7 +305,7 @@ def extract_biometric_encoding(
 
 
 def extract_eye_encoding(image_bytes: bytes) -> list[float]:
-    return extract_face_encoding(image_bytes)
+    raise FaceEncoderError("Eye encoding is computed on the client (MediaPipe).")
 
 
 def extract_palm_encoding(image_bytes: bytes) -> list[float]:

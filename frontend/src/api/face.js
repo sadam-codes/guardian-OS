@@ -31,10 +31,15 @@ function appendImages(form, imageFiles) {
   })
 }
 
-export async function faceSignup(name, imageFiles, role = 'user', actorRole = null) {
+function appendEyeEncodings(form, eyeEncodingsList) {
+  form.append('eye_encodings', JSON.stringify(eyeEncodingsList))
+}
+
+export async function faceSignup(name, imageFiles, eyeEncodings, role = 'user', actorRole = null) {
   const form = new FormData()
   form.append('name', name.trim())
   appendImages(form, imageFiles)
+  appendEyeEncodings(form, eyeEncodings)
   form.append('role', role)
   if (actorRole) form.append('actor_role', actorRole)
 
@@ -47,9 +52,10 @@ export async function faceSignup(name, imageFiles, role = 'user', actorRole = nu
   return res.json()
 }
 
-export async function faceLogin(imageFiles) {
+export async function faceLogin(imageFiles, eyeEncodings) {
   const form = new FormData()
   appendImages(form, imageFiles)
+  appendEyeEncodings(form, eyeEncodings)
 
   const res = await fetchWithTimeout(`${API_BASE}/face/login`, {
     method: 'POST',

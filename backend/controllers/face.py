@@ -54,6 +54,7 @@ async def face_signup(
     name: str = Form(..., min_length=1, max_length=100),
     image: UploadFile | None = File(default=None),
     images: list[UploadFile] = File(default=[]),
+    eye_encodings: str = Form(..., description="JSON array of eye vectors, one per image frame"),
     role: str = Form(default=ROLE_USER),
     actor_role: str | None = Form(default=None),
     db: Session = Depends(get_db),
@@ -62,7 +63,12 @@ async def face_signup(
     actor = actor_role if actor_role == "admin" else None
     try:
         user = signup_face(
-            db, name, image_bytes_list=image_bytes_list, role=role, actor_role=actor_role
+            db,
+            name,
+            image_bytes_list=image_bytes_list,
+            eye_encodings_json=eye_encodings,
+            role=role,
+            actor_role=actor_role,
         )
     except FaceAuthError as exc:
         record_activity(
@@ -96,11 +102,12 @@ async def face_signup(
 async def face_login(
     image: UploadFile | None = File(default=None),
     images: list[UploadFile] = File(default=[]),
+    eye_encodings: str = Form(..., description="JSON array of eye vectors, one per image frame"),
     db: Session = Depends(get_db),
 ) -> FaceLoginResponse:
     image_bytes_list = await _collect_image_bytes(image, images)
     try:
-        user = login_face(db, image_bytes_list=image_bytes_list)
+        user = login_face(db, image_bytes_list=image_bytes_list, eye_encodings_json=eye_encodings)
     except FaceAuthError as exc:
         record_activity(
             db,
