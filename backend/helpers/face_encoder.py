@@ -13,15 +13,21 @@ BIOMETRIC_EYE = "eye"
 ENCODING_VERSION = 4
 EYE_ENCODING_VERSION = 1
 
-# ArcFace cosine similarity on L2-normalized 512-d vectors
-LOGIN_MIN_SIMILARITY = 0.40
-SIGNUP_DUPLICATE_MIN_SIMILARITY = 0.55
-SIGNUP_DUPLICATE_MIN_GAP = 0.08
+# ArcFace cosine similarity on L2-normalized 512-d vectors — LOGIN (strict)
+LOGIN_MIN_SIMILARITY = 0.50
+# If two accounts both pass LOGIN_MIN_SIMILARITY, best must win by this gap.
+LOGIN_MIN_SIMILARITY_GAP = 0.06
 
-# MediaPipe landmark eye identity (normalized client vector)
-LOGIN_MIN_EYE_SIMILARITY = 0.82
-SIGNUP_DUPLICATE_EYE_MIN_SIMILARITY = 0.92
-SIGNUP_DUPLICATE_EYE_MIN_GAP = 0.06
+# Signup duplicate: only block when similarity is identity-level (stops false “already Sadam” on strangers).
+SIGNUP_DUPLICATE_FACE_MIN = 0.93
+SIGNUP_DUPLICATE_FACE_GAP = 0.07
+
+# MediaPipe landmark eye identity — LOGIN (strict)
+LOGIN_MIN_EYE_SIMILARITY = 0.88
+
+# Signup duplicate eyes (landmarks correlate across people; keep bar high)
+SIGNUP_DUPLICATE_EYE_MIN = 0.96
+SIGNUP_DUPLICATE_EYE_GAP = 0.05
 
 ENCODING_SIZE = (128, 128)
 LBP_GRID = (4, 4)
@@ -89,6 +95,15 @@ def passes_login_eye_similarity(similarity: float) -> bool:
     return similarity >= LOGIN_MIN_EYE_SIMILARITY
 
 
+def passes_login_face_ambiguity(best_similarity: float, second_similarity: float | None) -> bool:
+    """Reject login when two enrolled faces score similarly (ambiguous winner)."""
+    if second_similarity is None:
+        return True
+    if second_similarity < LOGIN_MIN_SIMILARITY:
+        return True
+    return (best_similarity - second_similarity) >= LOGIN_MIN_SIMILARITY_GAP
+
+
 def eye_encoding_to_json(encoding: list[float]) -> str:
     return json.dumps(
         {
@@ -116,22 +131,22 @@ def is_signup_duplicate_eye(
     best_similarity: float,
     second_similarity: float | None,
 ) -> bool:
-    if best_similarity < SIGNUP_DUPLICATE_EYE_MIN_SIMILARITY:
+    if best_similarity < SIGNUP_DUPLICATE_EYE_MIN:
         return False
     if second_similarity is None:
         return True
-    return (best_similarity - second_similarity) >= SIGNUP_DUPLICATE_EYE_MIN_GAP
+    return (best_similarity - second_similarity) >= SIGNUP_DUPLICATE_EYE_GAP
 
 
 def is_signup_duplicate(
     best_similarity: float,
     second_similarity: float | None,
 ) -> bool:
-    if best_similarity < SIGNUP_DUPLICATE_MIN_SIMILARITY:
+    if best_similarity < SIGNUP_DUPLICATE_FACE_MIN:
         return False
     if second_similarity is None:
         return True
-    return (best_similarity - second_similarity) >= SIGNUP_DUPLICATE_MIN_GAP
+    return (best_similarity - second_similarity) >= SIGNUP_DUPLICATE_FACE_GAP
 
 
 def _local_binary_pattern(gray: np.ndarray) -> np.ndarray:

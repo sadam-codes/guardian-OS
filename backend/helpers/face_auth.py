@@ -19,6 +19,7 @@ from helpers.face_encoder import (
     is_signup_duplicate,
     is_signup_duplicate_eye,
     passes_login_eye_similarity,
+    passes_login_face_ambiguity,
     passes_login_similarity,
 )
 from helpers.roles import ROLE_ADMIN, ROLE_USER, VALID_ROLES
@@ -96,6 +97,13 @@ def _resolve_login(scores: list[tuple[Register, float, int]]) -> tuple[Register,
     best_user, best_sim, best_version = scores[0]
     if not passes_login_similarity(best_sim):
         raise FaceAuthError("Face not recognized. Please sign up first.", 401)
+
+    second_sim = scores[1][1] if len(scores) > 1 else None
+    if not passes_login_face_ambiguity(best_sim, second_sim):
+        raise FaceAuthError(
+            "Another enrolled face matches almost as strongly. Step closer to the camera or improve lighting and try again.",
+            401,
+        )
 
     return best_user, best_sim, best_version
 

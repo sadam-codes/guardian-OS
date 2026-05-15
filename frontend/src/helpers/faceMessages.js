@@ -108,6 +108,15 @@ export function parseFaceAuthError(message, mode = 'login') {
     }
   }
 
+  if (lower.includes('another enrolled face matches')) {
+    return {
+      type: 'error',
+      title: 'Match too close to another account',
+      detail:
+        'Improve lighting and face the camera squarely so your profile wins clearly over other enrolled users.',
+    }
+  }
+
   if (lower.includes('not recognized') || lower.includes('sign up first')) {
     return {
       type: 'error',
