@@ -2,6 +2,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy.orm import Session
 
 from config.database import get_db
+from helpers.activity_log import (
+    STATUS_FAILURE,
+    STATUS_SUCCESS,
+    record_activity,
+)
 from helpers.face_auth import (
     FaceAuthError,
     delete_user,
@@ -42,12 +47,29 @@ async def face_signup(
     db: Session = Depends(get_db),
 ) -> FaceSignupResponse:
     image_bytes = await _read_image(image)
+    actor = actor_role if actor_role == "admin" else None
     try:
         user = signup_face(db, name, image_bytes, role=role, actor_role=actor_role)
     except FaceAuthError as exc:
+        record_activity(
+            db,
+            event_type="signup",
+            status=STATUS_FAILURE,
+            message=exc.message,
+            actor_name=actor,
+            target_name=name.strip(),
+        )
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     role_label = "Administrator" if user.role == "admin" else "User"
+    record_activity(
+        db,
+        event_type="signup",
+        status=STATUS_SUCCESS,
+        message=f"{user.name} enrolled as {role_label}",
+        actor_name=actor,
+        target_name=user.name,
+    )
     return FaceSignupResponse(
         message=f"{user.name} enrolled successfully as {role_label}.",
         name=user.name,
@@ -65,9 +87,22 @@ async def face_login(
     try:
         user = login_face(db, image_bytes)
     except FaceAuthError as exc:
+        record_activity(
+            db,
+            event_type="login",
+            status=STATUS_FAILURE,
+            message=exc.message,
+        )
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     role_label = "Administrator" if user.role == "admin" else "User"
+    record_activity(
+        db,
+        event_type="login",
+        status=STATUS_SUCCESS,
+        message=f"{user.name} signed in ({role_label})",
+        actor_name=user.name,
+    )
     return FaceLoginResponse(
         message=f"Welcome back, {user.name}! ({role_label})",
         name=user.name,
@@ -94,6 +129,7 @@ def get_user(
 async def update_registered_user(
     user_id: int,
     actor_role: str = Form(...),
+    actor_name: str | None = Form(default=None),
     name: str | None = Form(default=None),
     role: str | None = Form(default=None),
     image: UploadFile | None = File(default=None),
@@ -113,7 +149,23 @@ async def update_registered_user(
             image_bytes=image_bytes,
         )
     except FaceAuthError as exc:
+        record_activity(
+            db,
+            event_type="user_update",
+            status=STATUS_FAILURE,
+            message=exc.message,
+            actor_name=actor_name,
+        )
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    record_activity(
+        db,
+        event_type="user_update",
+        status=STATUS_SUCCESS,
+        message=f"Updated user {user.name}",
+        actor_name=actor_name,
+        target_name=user.name,
+    )
 
     item = RegisteredUserItem(id=user.id, name=user.name, role=user.role, created_at=user.created_at)
     return UserUpdateResponse(message=f"Updated {user.name} successfully.", user=item)
@@ -134,7 +186,24 @@ def remove_registered_user(
     try:
         delete_user(db, user_id, actor_role=actor_role, actor_name=actor_name)
     except FaceAuthError as exc:
+        record_activity(
+            db,
+            event_type="user_delete",
+            status=STATUS_FAILURE,
+            message=exc.message,
+            actor_name=actor_name,
+            target_name=display_name,
+        )
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    record_activity(
+        db,
+        event_type="user_delete",
+        status=STATUS_SUCCESS,
+        message=f"Deleted user {display_name}",
+        actor_name=actor_name,
+        target_name=display_name,
+    )
 
     return UserDeleteResponse(message=f"Deleted {display_name} successfully.")
 

@@ -174,7 +174,7 @@ function Tab({ active, onClick, children }) {
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 rounded-md px-5 py-2 text-sm font-medium transition ${
+      className={`flex-1 cursor-pointer rounded-md px-5 py-2 text-sm font-medium transition ${
         active ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
       }`}
     >
@@ -184,20 +184,6 @@ function Tab({ active, onClick, children }) {
 }
 
 function StatusBar({ scanning, error, mode, cameraActive }) {
-  return (
-    <div className="mt-6 flex flex-col items-center gap-2 border-t border-slate-100 pt-6">
-      {!cameraActive && !error && (
-        <p className="text-sm text-slate-500">Press Open camera when you are ready.</p>
-      )}
-      {scanning && (
-        <p className="flex items-center gap-2 text-sm text-slate-500">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
-          {mode === 'login' ? 'Looking for your face…' : 'Enrolling face…'}
-        </p>
-      )}
-      {error && (
-        <p className="rounded-lg bg-red-50 px-4 py-2 text-center text-sm text-red-700">{error}</p>
-      )}
-    </div>
-  )
+  return null
 }
+  

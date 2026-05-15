@@ -152,7 +152,7 @@ export default function LiveFaceScanner({
               <button
                 type="button"
                 onClick={openCamera}
-                className="rounded-xl border border-slate-500 bg-slate-700 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-600"
+                className="cursor-pointer rounded-xl border border-slate-500 bg-slate-700 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-600"
               >
                 Try again
               </button>

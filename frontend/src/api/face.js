@@ -43,9 +43,10 @@ export async function fetchRegisteredUsers() {
   return res.json()
 }
 
-export async function updateUser(userId, { name, role, imageFile }, actorRole) {
+export async function updateUser(userId, { name, role, imageFile }, actorRole, actorName = null) {
   const form = new FormData()
   form.append('actor_role', actorRole)
+  if (actorName) form.append('actor_name', actorName)
   if (name != null) form.append('name', name.trim())
   if (role != null) form.append('role', role)
   if (imageFile) form.append('image', imageFile, imageFile.name || 'face.jpg')

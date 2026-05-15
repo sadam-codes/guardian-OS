@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config.database import engine, init_db, log_db_status
 from config.settings import settings
-from controllers import face_router, health_router
+from controllers import activity_router, face_router, health_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,3 +39,4 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(face_router)
+app.include_router(activity_router)

@@ -33,7 +33,7 @@ export function ToastProvider({ children }) {
     <ToastContext.Provider value={toast}>
       {children}
       <div
-        className="pointer-events-none fixed right-4 top-4 z-[100] flex w-full max-w-sm flex-col gap-3"
+        className="pointer-events-none fixed left-1/2 top-4 z-[100] flex w-full max-w-sm -translate-x-1/2 flex-col items-center gap-3 px-4"
         aria-live="polite"
       >
         {toasts.map((t) => (
@@ -64,14 +64,14 @@ function ToastItem({ toast, onDismiss }) {
   return (
     <div
       role="alert"
-      className={`toast-enter pointer-events-auto flex items-start gap-3 rounded-xl border px-4 py-3 shadow-lg ${styles}`}
+      className={`toast-enter pointer-events-auto flex w-full items-start gap-3 rounded-xl border px-4 py-3 shadow-lg ${styles}`}
     >
       <ToastIcon type={toast.type} className={`mt-0.5 h-5 w-5 shrink-0 ${iconColor}`} />
       <p className="flex-1 text-sm font-medium leading-snug">{toast.message}</p>
       <button
         type="button"
         onClick={onDismiss}
-        className="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+        className="shrink-0 cursor-pointer rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
         aria-label="Dismiss"
       >
         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

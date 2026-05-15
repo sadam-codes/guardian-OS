@@ -22,7 +22,7 @@ export default function PageHeader({ title, subtitle, session, onLogout, extra }
               onClick={onLogout}
               aria-label="Log out"
               title="Log out"
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+              className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
             >
               <LogoutIcon className="h-5 w-5" />
             </button>

@@ -1,13 +1,11 @@
 import { useState } from 'react'
-import { deleteUser, updateUser } from '../api/face'
+import { deleteUser } from '../api/face'
 import { useToast } from './ToastProvider'
 
 const ROLE_ADMIN = 'admin'
-const ROLE_USER = 'user'
 
 export default function UserManagement({ users, actorRole, actorName, onRefresh }) {
   const toast = useToast()
-  const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [busy, setBusy] = useState(false)
 
@@ -39,55 +37,22 @@ export default function UserManagement({ users, actorRole, actorName, onRefresh 
                   <RoleBadge role={u.role} />
                 </td>
                 <td className="py-2.5 text-right">
-                  <div className="flex justify-end gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setEditing(u)}
-                      className="rounded-lg px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDeleting(u)}
-                      disabled={actorName === u.name}
-                      title={actorName === u.name ? 'Cannot delete your own account' : 'Delete user'}
-                      className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      Delete
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDeleting(u)}
+                    disabled={actorName === u.name}
+                    aria-label={actorName === u.name ? 'Cannot delete your own account' : `Delete ${u.name}`}
+                    title={actorName === u.name ? 'Cannot delete your own account' : 'Delete user'}
+                    className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <TrashIcon className="h-5 w-5" />
+                  </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-
-      {editing && (
-        <EditUserModal
-          user={editing}
-          busy={busy}
-          onClose={() => setEditing(null)}
-          onSave={async (payload) => {
-            if (!payload.name && !payload.role && !payload.imageFile) {
-              toast.error('No changes to save')
-              return
-            }
-            setBusy(true)
-            try {
-              const data = await updateUser(editing.id, payload, actorRole)
-              toast.success(data.message)
-              setEditing(null)
-              await onRefresh()
-            } catch (err) {
-              toast.error(err.message)
-            } finally {
-              setBusy(false)
-            }
-          }}
-        />
-      )}
 
       {deleting && (
         <ConfirmModal
@@ -116,56 +81,6 @@ export default function UserManagement({ users, actorRole, actorName, onRefresh 
   )
 }
 
-function EditUserModal({ user, busy, onClose, onSave }) {
-  const [name, setName] = useState(user.name)
-  const [role, setRole] = useState(user.role)
-  const [faceFile, setFaceFile] = useState(null)
-
-  return (
-    <Modal title="Edit user" onClose={onClose}>
-      <div className="space-y-4">
-        <Field label="Full name">
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className={inputClass}
-          />
-        </Field>
-        <Field label="Role">
-          <select value={role} onChange={(e) => setRole(e.target.value)} className={inputClass}>
-            <option value={ROLE_USER}>User</option>
-            <option value={ROLE_ADMIN}>Admin</option>
-          </select>
-        </Field>
-        <Field label="Update face (optional)">
-          <input
-            type="file"
-            accept="image/*"
-            capture="user"
-            onChange={(e) => setFaceFile(e.target.files?.[0] || null)}
-            className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-indigo-700"
-          />
-          <p className="mt-1 text-xs text-slate-500">Leave empty to keep the current face data.</p>
-        </Field>
-      </div>
-      <ModalActions
-        busy={busy}
-        onCancel={onClose}
-        onConfirm={() =>
-          onSave({
-            name: name.trim() !== user.name ? name.trim() : null,
-            role: role !== user.role ? role : null,
-            imageFile: faceFile,
-          })
-        }
-        confirmDisabled={!name.trim()}
-        confirmLabel="Save changes"
-      />
-    </Modal>
-  )
-}
-
 function ConfirmModal({ title, message, confirmLabel, danger, busy, onClose, onConfirm }) {
   return (
     <Modal title={title} onClose={onClose}>
@@ -186,7 +101,7 @@ function Modal({ title, children, onClose }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
-        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+        className="absolute inset-0 cursor-pointer bg-slate-900/40 backdrop-blur-sm"
         aria-label="Close"
         onClick={onClose}
       />
@@ -198,22 +113,22 @@ function Modal({ title, children, onClose }) {
   )
 }
 
-function ModalActions({ busy, onCancel, onConfirm, confirmLabel, confirmDisabled, danger }) {
+function ModalActions({ busy, onCancel, onConfirm, confirmLabel, danger }) {
   return (
     <div className="mt-6 flex justify-end gap-2">
       <button
         type="button"
         onClick={onCancel}
         disabled={busy}
-        className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        className="cursor-pointer rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
       >
         Cancel
       </button>
       <button
         type="button"
         onClick={onConfirm}
-        disabled={busy || confirmDisabled}
-        className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${
+        disabled={busy}
+        className={`cursor-pointer rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 ${
           danger ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'
         }`}
       >
@@ -223,12 +138,15 @@ function ModalActions({ busy, onCancel, onConfirm, confirmLabel, confirmDisabled
   )
 }
 
-function Field({ label, children }) {
+function TrashIcon({ className }) {
   return (
-    <div>
-      <label className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
-      {children}
-    </div>
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
+      />
+    </svg>
   )
 }
 
@@ -244,6 +162,3 @@ function RoleBadge({ role }) {
     </span>
   )
 }
-
-const inputClass =
-  'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-slate-900 shadow-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20'

@@ -65,7 +65,7 @@ def check_db_connection(db: Session) -> bool:
 
 
 def init_db() -> None:
-    from models import Base, Register  # noqa: F401
+    from models import ActivityLog, Base, Register  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:

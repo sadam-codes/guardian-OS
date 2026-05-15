@@ -17,6 +17,26 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+@layer base {
+  button:not(:disabled),
+  a[href],
+  [role="button"]:not([aria-disabled="true"]),
+  label[for],
+  select,
+  summary,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  input[type="file"]::file-selector-button {
+    @apply cursor-pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    @apply cursor-not-allowed;
+  }
+}
+
 #root {
   min-height: 100vh;
 }
@@ -24,11 +44,11 @@ body {
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateX(1rem);
+    transform: translateY(-0.75rem);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(0);
   }
 }
 
