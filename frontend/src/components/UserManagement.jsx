@@ -1,13 +1,39 @@
 import { useState } from 'react'
-import { deleteUser } from '../api/face'
+import { deleteUser, updateUser } from '../api/face'
 import { useToast } from './ToastProvider'
 
 const ROLE_ADMIN = 'admin'
+const ROLE_USER = 'user'
 
-export default function UserManagement({ users, actorRole, actorName, onRefresh }) {
+export default function UserManagement({
+  users,
+  actorRole,
+  actorName,
+  currentUserId,
+  onRefresh,
+  onSessionUpdate,
+}) {
   const toast = useToast()
   const [deleting, setDeleting] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [roleBusy, setRoleBusy] = useState(null)
+
+  async function handleRoleChange(user, newRole) {
+    if (newRole === user.role) return
+    setRoleBusy(user.id)
+    try {
+      const data = await updateUser(user.id, { role: newRole }, actorRole, actorName)
+      toast.success(data.message || `Role updated to ${newRole === ROLE_ADMIN ? 'Admin' : 'User'}.`)
+      if (currentUserId === user.id && onSessionUpdate) {
+        onSessionUpdate({ role: newRole })
+      }
+      await onRefresh()
+    } catch (err) {
+      toast.error(err.message || 'Could not update role.')
+    } finally {
+      setRoleBusy(null)
+    }
+  }
 
   if (users.length === 0) {
     return <p className="text-sm text-slate-500">No users registered yet.</p>
@@ -16,7 +42,7 @@ export default function UserManagement({ users, actorRole, actorName, onRefresh 
   return (
     <>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[280px] text-left text-sm">
+        <table className="w-full min-w-[320px] text-left text-sm">
           <thead>
             <tr className="border-b border-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <th className="pb-2 pr-2">User</th>
@@ -34,7 +60,16 @@ export default function UserManagement({ users, actorRole, actorName, onRefresh 
                   )}
                 </td>
                 <td className="py-2.5 pr-2">
-                  <RoleBadge role={u.role} />
+                  <select
+                    value={u.role}
+                    disabled={roleBusy === u.id}
+                    onChange={(e) => handleRoleChange(u, e.target.value)}
+                    aria-label={`Role for ${u.name}`}
+                    className="cursor-pointer rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    <option value={ROLE_USER}>User</option>
+                    <option value={ROLE_ADMIN}>Admin</option>
+                  </select>
                 </td>
                 <td className="py-2.5 text-right">
                   <button
@@ -147,18 +182,5 @@ function TrashIcon({ className }) {
         d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
       />
     </svg>
-  )
-}
-
-function RoleBadge({ role }) {
-  const isAdmin = role === ROLE_ADMIN
-  return (
-    <span
-      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
-        isAdmin ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'
-      }`}
-    >
-      {isAdmin ? 'Admin' : 'User'}
-    </span>
   )
 }

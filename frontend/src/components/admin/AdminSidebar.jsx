@@ -14,23 +14,58 @@ const NAV = [
     label: 'Activity logs',
     icon: ActivityIcon,
   },
+  {
+    id: 'jarvis',
+    label: 'Voice assistant',
+    icon: JarvisIcon,
+    href: '/jarvis',
+  },
 ]
 
-export default function AdminSidebar({ active, onChange }) {
+function navHref(id, href, linkNav) {
+  if (href) return href
+  if (linkNav) {
+    if (id === 'dashboard') return '/admin'
+    return `/admin?tab=${id}`
+  }
+  return null
+}
+
+export default function AdminSidebar({ active, onChange, linkNav = false }) {
   return (
     <aside className="flex w-full shrink-0 flex-col border-b border-slate-200 bg-white lg:w-64 lg:border-b-0 lg:border-r">
       <nav className="flex gap-1 overflow-x-auto p-3 lg:flex-col lg:overflow-visible lg:p-4">
-        {NAV.map(({ id, label, icon: Icon }) => {
+        {NAV.map(({ id, label, icon: Icon, href }) => {
+          const target = navHref(id, href, linkNav)
           const isActive = active === id
+
+          if (target) {
+            return (
+              <a
+                key={id}
+                href={target}
+                className={`flex shrink-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition lg:w-full ${
+                  isActive
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <Icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
+                {label}
+              </a>
+            )
+          }
+
           return (
             <button
               key={id}
               type="button"
               onClick={() => onChange(id)}
-              className={`flex shrink-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition lg:w-full ${isActive
+              className={`flex shrink-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition lg:w-full ${
+                isActive
                   ? 'bg-indigo-50 text-indigo-700'
                   : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                }`}
+              }`}
             >
               <Icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
               {label}
@@ -62,6 +97,18 @@ function ActivityIcon({ className }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
+    </svg>
+  )
+}
+
+function JarvisIcon({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
+      />
     </svg>
   )
 }

@@ -49,6 +49,12 @@ export default function UserPage() {
           <p className="mt-2 text-slate-600">
             You are signed in. Your face was recognized and you were brought here automatically.
           </p>
+          <a
+            href="/jarvis"
+            className="mt-6 inline-flex cursor-pointer items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+          >
+            Open voice assistant
+          </a>
         </div>
       </main>
     </div>

@@ -186,4 +186,3 @@ function Tab({ active, onClick, children }) {
 function StatusBar({ scanning, error, mode, cameraActive }) {
   return null
 }
-  

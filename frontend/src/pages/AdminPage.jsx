@@ -6,13 +6,16 @@ import DashboardPanel from '../components/admin/DashboardPanel'
 import UsersPanel from '../components/admin/UsersPanel'
 import AdminHeader from '../components/admin/AdminHeader'
 import { useToast } from '../components/ToastProvider'
-import { getSession, logoutToHome } from '../lib/session'
+import { getSession, logoutToHome, setSession } from '../lib/session'
 
 const ROLE_ADMIN = 'admin'
 
 export default function AdminPage() {
   const session = getSession()
-  const [activeTab, setActiveTab] = useState('dashboard')
+  const [activeTab, setActiveTab] = useState(() => {
+    const tab = new URLSearchParams(window.location.search).get('tab')
+    return tab === 'users' || tab === 'activity' ? tab : 'dashboard'
+  })
   const [users, setUsers] = useState([])
   const toast = useToast()
 
@@ -56,7 +59,16 @@ export default function AdminPage() {
         <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
           {activeTab === 'dashboard' && <DashboardPanel />}
           {activeTab === 'users' && (
-            <UsersPanel users={users} actorName={session?.name} onRefresh={loadUsers} />
+            <UsersPanel
+              users={users}
+              actorName={session?.name}
+              currentUserId={session?.id}
+              onRefresh={loadUsers}
+              onSessionUpdate={(patch) => {
+                const current = getSession()
+                if (current) setSession({ ...current, ...patch })
+              }}
+            />
           )}
           {activeTab === 'activity' && <ActivityLogsPanel />}
         </main>

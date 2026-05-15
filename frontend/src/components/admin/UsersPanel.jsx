@@ -1,6 +1,6 @@
 import UserManagement from '../UserManagement'
 
-export default function UsersPanel({ users, actorName, onRefresh }) {
+export default function UsersPanel({ users, actorName, currentUserId, onRefresh, onSessionUpdate }) {
   return (
     <div className="space-y-4">
       <div>
@@ -12,7 +12,9 @@ export default function UsersPanel({ users, actorName, onRefresh }) {
           users={users}
           actorRole="admin"
           actorName={actorName}
+          currentUserId={currentUserId}
           onRefresh={onRefresh}
+          onSessionUpdate={onSessionUpdate}
         />
       </div>
     </div>
