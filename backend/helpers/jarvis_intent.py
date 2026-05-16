@@ -2,8 +2,11 @@ import json
 import os
 import re
 
+from helpers.jarvis_local import extract_path_candidate, try_local_intent
 from helpers.jarvis_web import looks_like_web_search
 from schemas.jarvis import JarvisIntent
+
+_RULE_FIRST_MIN_CONF = 0.88
 
 _RULES: list[tuple[re.Pattern[str], str, float, dict[str, str]]] = []
 
@@ -58,6 +61,23 @@ _rule(r"(?:google|googling)\s+(?:for\s+)?(?P<query>.+)", "web_search", 0.9, quer
 _rule(r"(?:look\s*up|lookup|find|browse)\s+(?P<query>.+)\s+(?:on\s+)?(?:the\s+)?(?:web|internet|online|google)", "web_search", 0.9, query="query")
 _rule(r"(?:look\s*up|lookup|find)\s+(?P<query>.+)", "web_search", 0.86, query="query")
 _rule(r"open (?:my )?(?P<folder>desktop|documents|downloads|home|pictures)", "open_folder", 0.9, folder="folder")
+_rule(
+    r"(?:open|launch|start)\s+(?:the\s+)?(?:(windows\s+)?terminal|wt)\b",
+    "open_terminal",
+    0.94,
+)
+_rule(
+    r"(?:open|launch|start)\s+(?:the\s+)?(?P<shell>command\s+prompt|cmd)\b",
+    "open_terminal",
+    0.93,
+    shell="shell",
+)
+_rule(
+    r"(?:open|launch|start)\s+(?:the\s+)?(?P<shell>powershell|pwsh)\b",
+    "open_terminal",
+    0.93,
+    shell="shell",
+)
 _rule(r"minimize (?:all )?windows|show desktop", "minimize_all", 0.9)
 _rule(r"(?:take )?screenshot|capture screen", "screenshot", 0.9)
 _rule(
@@ -90,7 +110,11 @@ def _parse_with_llm(text: str) -> JarvisIntent | None:
         prompt = (
             "Parse this voice command into JSON with keys: intent, confidence (0-1), slots (object). "
             "Intents: greet, time, date, lock, volume_up, volume_down, volume_mute, open_app, "
-            "open_url, web_search, open_folder, minimize_all, screenshot, shutdown, restart, help, unknown. "
+            "open_url, web_search, open_folder, open_path, open_terminal, minimize_all, screenshot, "
+            "shutdown, restart, youtube_search, help, acknowledge, cancel, unknown. "
+            "open_path: local file/folder; slots.path = full Windows path or a drive root like C: plus backslash. "
+            "open_terminal: slots.shell is wt, cmd, or powershell. "
+            "Never use web_search for terminal, cmd, PowerShell, C: drive, or file paths. "
             f"Command: {text}"
         )
         resp = client.chat.completions.create(
@@ -99,13 +123,35 @@ def _parse_with_llm(text: str) -> JarvisIntent | None:
             max_tokens=120,
         )
         data = json.loads(resp.choices[0].message.content or "{}")
+        raw_slots = data.get("slots") or {}
+        slots: dict[str, str] = {}
+        if isinstance(raw_slots, dict):
+            for k, v in raw_slots.items():
+                if v is None:
+                    continue
+                slots[str(k).strip()] = str(v).strip()
         return JarvisIntent(
-            intent=data.get("intent", "unknown"),
+            intent=str(data.get("intent", "unknown")).strip() or "unknown",
             confidence=float(data.get("confidence", 0.7)),
-            slots=data.get("slots") or {},
+            slots=slots,
         )
     except Exception:
         return None
+
+
+def _sanitize_llm_intent(intent: JarvisIntent, clean: str) -> JarvisIntent:
+    repaired = try_local_intent(clean)
+    if repaired and intent.intent in ("web_search", "unknown", "open_app"):
+        if intent.intent != "open_app" or repaired.intent in ("open_path", "open_terminal"):
+            return repaired
+    pc = extract_path_candidate(clean)
+    if pc and intent.intent == "open_path" and not (intent.slots.get("path") or "").strip():
+        return JarvisIntent(
+            intent="open_path",
+            confidence=max(intent.confidence, 0.88),
+            slots={"path": pc},
+        )
+    return intent
 
 
 def parse_jarvis_intent(text: str) -> JarvisIntent:
@@ -113,9 +159,15 @@ def parse_jarvis_intent(text: str) -> JarvisIntent:
     if not clean:
         return JarvisIntent(intent="unknown", confidence=0.0)
 
-    llm = _parse_with_llm(clean)
-    if llm and llm.confidence >= 0.75:
-        return llm
+    use_llm = os.getenv("JARVIS_USE_LLM", "true").lower() in ("1", "true", "yes")
+    if use_llm:
+        llm = _parse_with_llm(clean)
+        if llm and llm.confidence >= 0.65:
+            return _sanitize_llm_intent(llm, clean)
+
+    local = try_local_intent(clean)
+    if local:
+        return local
 
     best: JarvisIntent | None = None
     for pattern, intent, confidence, slot_map in _RULES:
@@ -130,11 +182,17 @@ def parse_jarvis_intent(text: str) -> JarvisIntent:
         if best is None or confidence > best.confidence:
             best = JarvisIntent(intent=intent, confidence=confidence, slots=slots)
 
+    if best and best.confidence >= _RULE_FIRST_MIN_CONF:
+        return best
+
     if best:
         return best
 
     lower = clean.lower()
     if lower.startswith("open "):
+        pc = extract_path_candidate(clean)
+        if pc:
+            return JarvisIntent(intent="open_path", confidence=0.84, slots={"path": pc})
         target = clean[5:].strip()
         if target.startswith("http"):
             return JarvisIntent(intent="open_url", confidence=0.75, slots={"url": target})

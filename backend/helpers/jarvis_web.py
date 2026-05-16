@@ -2,7 +2,6 @@
 
 import re
 from urllib.parse import quote
-
 KNOWN_SITES: dict[str, str] = {
     "github": "https://github.com",
     "google": "https://www.google.com",
@@ -75,11 +74,6 @@ def resolve_web_open(raw: str) -> tuple[str, str] | None:
 def google_search_url(query: str) -> str:
     clean = query.strip().strip("'\"")
     return f"https://www.google.com/search?q={quote(clean)}"
-
-
-def youtube_search_url(query: str) -> str:
-    clean = query.strip().strip("'\"")
-    return f"https://www.youtube.com/results?search_query={quote(clean)}"
 
 
 _SEARCH_HINTS = (

@@ -20,6 +20,8 @@ def get_capabilities() -> JarvisCapabilitiesResponse:
                 "time",
                 "date",
                 "open_app",
+                "open_path",
+                "open_terminal",
                 "web_search",
                 "open_folder",
                 "lock",

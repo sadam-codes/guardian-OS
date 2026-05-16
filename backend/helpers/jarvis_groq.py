@@ -70,23 +70,45 @@ def _parse_json_content(raw: str) -> dict:
 
 
 def parse_intent_with_groq(text: str) -> JarvisIntent | None:
-    prompt = (
-        "Parse this voice command into JSON only (no markdown) with keys: "
-        "intent, confidence (0-1), slots (object). "
-        "Intents: greet, time, date, lock, volume_up, volume_down, volume_mute, open_app, "
-        "open_url, web_search, open_folder, minimize_all, screenshot, shutdown, restart, "
+    system = (
+        "You classify short Windows voice commands. Reply with JSON only (no markdown): "
+        '{"intent":"...","confidence":0-1,"slots":{...}}. '
+        "Intents: greet, time, date, lock, volume_up, volume_down, volume_mute, open_app, open_url, "
+        "web_search, open_folder, open_path, open_terminal, minimize_all, screenshot, shutdown, restart, "
         "youtube_search, help, acknowledge, cancel, unknown. "
-        f'Command: "{text}"'
+        "Rules: Use open_path with slots.path for any local path, drive, or folder (examples: C:\\\\Users, "
+        "D:\\\\, E:\\\\work\\\\notes.txt, Desktop folder as a path if user gives a path). "
+        "Use open_terminal with slots.shell (wt | cmd | powershell) for terminal, CMD, command prompt, "
+        "PowerShell, pwsh, or Windows Terminal. "
+        "Use web_search only for real internet questions or when the user clearly wants Google/the web — "
+        "never for opening shells, drives, or files. "
+        "open_app: start menu apps only when it is clearly an application name, not a path. "
+        "Understand Roman Urdu / mixed phrases the same way (e.g. kholo, jao, c drive, terminal chalao)."
     )
-    raw = _chat([{"role": "user", "content": prompt}], max_tokens=150, temperature=0.2)
+    user = f'Command: "{text}"'
+    raw = _chat(
+        [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        max_tokens=180,
+        temperature=0.1,
+    )
     if not raw:
         return None
     try:
         data = _parse_json_content(raw)
+        raw_slots = data.get("slots") or {}
+        slots: dict[str, str] = {}
+        if isinstance(raw_slots, dict):
+            for k, v in raw_slots.items():
+                if v is None:
+                    continue
+                slots[str(k).strip()] = str(v).strip()
         return JarvisIntent(
-            intent=data.get("intent", "unknown"),
+            intent=str(data.get("intent", "unknown")).strip() or "unknown",
             confidence=float(data.get("confidence", 0.75)),
-            slots=data.get("slots") or {},
+            slots=slots,
         )
     except (json.JSONDecodeError, TypeError, ValueError):
         return None
