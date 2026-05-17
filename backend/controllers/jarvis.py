@@ -1,10 +1,16 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from config.database import get_db
 from helpers.activity_log import STATUS_FAILURE, STATUS_INFO, STATUS_SUCCESS, record_activity
 from helpers.jarvis import ASSISTANT_NAME, jarvis_example_commands, process_jarvis_command
-from schemas.jarvis import JarvisCapabilitiesResponse, JarvisCommandRequest, JarvisCommandResponse
+from helpers.jarvis_transcribe import transcribe_audio_bytes, transcribe_enabled
+from schemas.jarvis import (
+    JarvisCapabilitiesResponse,
+    JarvisCommandRequest,
+    JarvisCommandResponse,
+    JarvisTranscribeResponse,
+)
 
 router = APIRouter(prefix="/jarvis", tags=["jarvis"])
 
@@ -29,6 +35,12 @@ def get_capabilities() -> JarvisCapabilitiesResponse:
                 "volume_down",
                 "volume_mute",
                 "screenshot",
+                "create_folder",
+                "write_text",
+                "run_project",
+                "compound",
+                "open_terminal_here",
+                "clear_context",
                 "help",
             }
         ),
@@ -37,7 +49,11 @@ def get_capabilities() -> JarvisCapabilitiesResponse:
 
 @router.post("/command", response_model=JarvisCommandResponse)
 def run_command(body: JarvisCommandRequest, db: Session = Depends(get_db)) -> JarvisCommandResponse:
-    response = process_jarvis_command(body.text, user_name=body.user_name)
+    response = process_jarvis_command(
+        body.text,
+        user_name=body.user_name,
+        context=body.context,
+    )
     actor = (body.user_name or "user").strip() or "user"
     record_activity(
         db,
@@ -49,3 +65,28 @@ def run_command(body: JarvisCommandRequest, db: Session = Depends(get_db)) -> Ja
     if response.intent == "help":
         record_activity(db, event_type="jarvis_help", status=STATUS_INFO, message="Jarvis help requested")
     return response
+
+
+@router.post("/transcribe", response_model=JarvisTranscribeResponse)
+async def transcribe_voice(file: UploadFile = File(...)) -> JarvisTranscribeResponse:
+    if not transcribe_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Voice transcription needs GROQ_API_KEY in backend .env",
+        )
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty audio file")
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Audio too large (max 25 MB)")
+
+    text = transcribe_audio_bytes(data, content_type=file.content_type or "audio/webm")
+    if not text:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No clear command heard (background noise or too quiet). "
+                "Tap mic, speak your command loudly, then pause for one second."
+            ),
+        )
+    return JarvisTranscribeResponse(text=text)

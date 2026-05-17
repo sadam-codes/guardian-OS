@@ -1,7 +1,21 @@
 """Resolve spoken 'open X' targets to browser URLs when appropriate."""
 
 import re
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
+
+_SITE_LABELS: dict[str, str] = {
+    "youtube.com": "YouTube",
+    "google.com": "Google",
+    "github.com": "GitHub",
+    "facebook.com": "Facebook",
+    "instagram.com": "Instagram",
+    "linkedin.com": "LinkedIn",
+    "x.com": "X",
+    "twitter.com": "X",
+    "mail.google.com": "Gmail",
+    "outlook.live.com": "Outlook",
+    "chat.openai.com": "ChatGPT",
+}
 KNOWN_SITES: dict[str, str] = {
     "github": "https://github.com",
     "google": "https://www.google.com",
@@ -19,6 +33,33 @@ _DOMAIN_RE = re.compile(
     r"^[\w-]+(\.[\w-]+)*\.(com|org|net|edu|gov|pk|io|co|app)(/\S*)?$",
     re.I,
 )
+
+
+def friendly_url_label(url: str) -> str:
+    """Human label for speech/UI — never read raw https:// aloud."""
+    raw = (url or "").strip()
+    if not raw:
+        return "that website"
+    lower = raw.lower()
+    if "youtube.com" in lower:
+        return "YouTube"
+    if "google.com" in lower:
+        return "Google search" if "/search" in lower else "Google"
+    for domain, label in _SITE_LABELS.items():
+        if domain in lower:
+            return label
+    try:
+        host = (urlparse(raw).hostname or "").lower()
+    except ValueError:
+        host = ""
+    if host.startswith("www."):
+        host = host[4:]
+    for domain, label in _SITE_LABELS.items():
+        if host == domain or host.endswith(f".{domain}"):
+            return label
+    if host:
+        return host.split(".")[0].title()
+    return "that website"
 
 
 def _clean_query(raw: str) -> str:
@@ -44,7 +85,7 @@ def resolve_web_open(raw: str) -> tuple[str, str] | None:
     lower = q.lower()
 
     if lower.startswith("http://") or lower.startswith("https://"):
-        return q, q
+        return q, friendly_url_label(q)
 
     if _DOMAIN_RE.match(lower):
         url = q if q.startswith("http") else f"https://{q}"

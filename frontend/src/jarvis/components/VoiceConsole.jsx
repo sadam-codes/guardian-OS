@@ -1,39 +1,61 @@
-import { useCallback, useEffect, useState } from 'react'
+﻿import { useCallback, useEffect, useState } from 'react'
 import { fetchJarvisCapabilities, sendJarvisCommand } from '../api/jarvis'
-import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
+import { useVoiceInput } from '../hooks/useVoiceInput'
 import { useToast } from '../../components/ToastProvider'
 
-function pickMaleEnglishVoice() {
+function pickFemaleEnglishVoice() {
   if (!('speechSynthesis' in window)) return null
   const voices = window.speechSynthesis.getVoices()
   if (!voices.length) return null
-  const prefer = (v) =>
-    v.lang.toLowerCase().startsWith('en') &&
-    /male|david|guy|daniel|mark|ryan|james|google uk english male|microsoft.*male/i.test(
-      `${v.name} ${v.voiceURI}`,
+
+  const isEnglish = (v) => v.lang.toLowerCase().startsWith('en')
+  const label = (v) => `${v.name} ${v.voiceURI}`.toLowerCase()
+  const isMale = (v) =>
+    /male|david|guy|daniel|mark|ryan|james|george|brian|eric|steven|richard|andrew/i.test(
+      label(v),
     )
-  return voices.find(prefer) || voices.find((v) => v.lang.toLowerCase().startsWith('en')) || voices[0]
+  const isFemale = (v) =>
+    isEnglish(v) &&
+    !isMale(v) &&
+    /female|zira|jenny|samantha|susan|linda|karen|aria|emma|hazel|natasha|laura|joanna|kimberly|salli|sonia|veena|michelle|helen|lily/i.test(
+      label(v),
+    )
+
+  return (
+    voices.find(isFemale) ||
+    voices.find((v) => isEnglish(v) && !isMale(v)) ||
+    voices.find(isEnglish) ||
+    voices[0]
+  )
 }
 
-function speakAloud(text) {
+function speakAloud(text, { delayMs = 0 } = {}) {
   if (!('speechSynthesis' in window) || !text?.trim()) return
   window.speechSynthesis.cancel()
-  const utter = new SpeechSynthesisUtterance(text)
-  const voice = pickMaleEnglishVoice()
-  if (voice) utter.voice = voice
-  utter.rate = 0.95
-  utter.pitch = 0.92
-  window.speechSynthesis.speak(utter)
+  const run = () => {
+    const utter = new SpeechSynthesisUtterance(text)
+    const voice = pickFemaleEnglishVoice()
+    if (voice) utter.voice = voice
+    utter.rate = 0.96
+    utter.pitch = 1.05
+    window.speechSynthesis.speak(utter)
+  }
+  if (delayMs > 0) setTimeout(run, delayMs)
+  else run()
 }
 
-const SPEECH_ERRORS = {
-  'not-allowed': 'Microphone blocked. Allow mic access in browser settings.',
-  'no-speech': 'No speech heard. Speak clearly, then pause briefly.',
-  'audio-capture': 'No microphone found.',
-  network: 'Speech needs internet (Chrome/Edge).',
-  aborted: '',
-  start_failed: 'Could not start mic. Click again.',
-  already_started: 'Already listening.',
+const VOICE_ERRORS = {
+  'not-allowed':
+    'Microphone blocked. Click the lock icon in the address bar, allow Microphone, then refresh.',
+  'no-speech': 'Did not catch words. Tap mic and say the full command clearly, then pause.',
+  'no-audio': 'No audio captured. Check Windows Sound settings and pick the correct input mic.',
+  'too-short': 'Too quick. Speak your full command, then pause 1–2 seconds.',
+  'too-quiet': 'Mic too quiet. Speak closer and louder; the red bar should move.',
+  'audio-capture': 'No microphone found. Plug in or enable a mic in Windows settings.',
+  record_failed: 'Could not record audio. Try Chrome or Edge.',
+  transcribe_failed: 'Could not transcribe. Check GROQ_API_KEY in backend .env.',
+  'speech-network': 'Live speech needs internet. Check connection or try again.',
+  network: 'Speech service unavailable. Check internet connection.',
 }
 
 const QUICK_EXAMPLES = 6
@@ -47,7 +69,7 @@ export default function VoiceConsole({ userName }) {
   const [showAllExamples, setShowAllExamples] = useState(false)
   const [history, setHistory] = useState([])
   const [lastReply, setLastReply] = useState(null)
-
+  const [sessionContext, setSessionContext] = useState(null)
   useEffect(() => {
     fetchJarvisCapabilities()
       .then((data) => {
@@ -59,7 +81,7 @@ export default function VoiceConsole({ userName }) {
 
   useEffect(() => {
     if (!('speechSynthesis' in window)) return
-    const load = () => pickMaleEnglishVoice()
+    const load = () => pickFemaleEnglishVoice()
     load()
     window.speechSynthesis.addEventListener('voiceschanged', load)
     return () => window.speechSynthesis.removeEventListener('voiceschanged', load)
@@ -72,7 +94,8 @@ export default function VoiceConsole({ userName }) {
       setBusy(true)
       setText('')
       try {
-        const res = await sendJarvisCommand(trimmed, userName)
+        const res = await sendJarvisCommand(trimmed, userName, sessionContext)
+        if (res.context) setSessionContext(res.context?.active ? res.context : null)
         const entry = {
           id: Date.now(),
           input: trimmed,
@@ -82,57 +105,59 @@ export default function VoiceConsole({ userName }) {
         }
         setHistory((prev) => [entry, ...prev.slice(0, 14)])
         setLastReply(entry)
-        speakAloud(res.message)
+        speakAloud(res.message, { delayMs: 400 })
       } catch (err) {
         toast.error(err.message || 'Could not reach server')
       } finally {
         setBusy(false)
       }
     },
-    [busy, toast, userName],
+    [busy, toast, userName, sessionContext],
   )
 
   const onVoiceResult = useCallback(
     (spoken) => {
       if (!spoken?.trim()) return
-      setText(spoken)
+      window.speechSynthesis?.cancel()
       runCommand(spoken)
     },
     [runCommand],
   )
 
-  const onSpeechError = useCallback(
-    (code) => {
-      const msg = SPEECH_ERRORS[code]
+  const onVoiceError = useCallback(
+    (codeOrMsg) => {
+      const msg = VOICE_ERRORS[codeOrMsg] || codeOrMsg
       if (msg) toast.error(msg)
     },
     [toast],
   )
 
-  const { listening, supported, interim, start, stop, ensureMicPermission, speechLang } =
-    useSpeechRecognition({
-      onResult: onVoiceResult,
-      onError: onSpeechError,
+  const { recording, transcribing, supported, level, interim, mode, toggleListening } =
+    useVoiceInput({
+      onTranscript: onVoiceResult,
+      onError: onVoiceError,
     })
 
-  useEffect(() => {
-    if (supported) ensureMicPermission().catch(() => {})
-  }, [supported, ensureMicPermission])
+  const micBlocked = !supported
+  const micBusy = recording || transcribing
 
-  const toggleMic = async () => {
-    if (listening) {
-      stop()
-      return
-    }
-    if (busy) {
+  const onMicClick = () => {
+    if (busy && !recording && !transcribing) {
       toast.error('Wait for the current command to finish.')
       return
     }
-    await start()
+    if (transcribing) return
+    toggleListening()
   }
 
   const visibleExamples = showAllExamples ? examples : examples.slice(0, QUICK_EXAMPLES)
-  const statusLabel = listening ? 'Listening…' : busy ? 'Working…' : `Talk to ${assistantName}`
+  const statusLabel = transcribing
+    ? 'Understanding…'
+    : recording
+      ? 'Listening… tap mic again to stop & send'
+      : busy
+        ? 'Working…'
+        : `Talk to ${assistantName}`
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -140,11 +165,19 @@ export default function VoiceConsole({ userName }) {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-base font-semibold text-slate-900">Voice assistant</h2>
-            <p className="text-xs text-slate-500">Speak or type · {speechLang} · Chrome/Edge</p>
+            <p className="text-xs text-slate-500">
+              Tap mic to start · tap again to stop & send
+              {mode === 'browser' && (
+                <span className="ml-1 text-emerald-600">· live speech</span>
+              )}
+              {sessionContext?.active && (
+                <span className="ml-1 text-indigo-600">· follow-up on</span>
+              )}
+            </p>
           </div>
           {history.length > 0 && (
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-              {history.length} recent
+              {history.length} recent 
             </span>
           )}
         </div>
@@ -154,29 +187,55 @@ export default function VoiceConsole({ userName }) {
         <div className="flex flex-col items-center lg:items-start">
           <button
             type="button"
-            onClick={toggleMic}
-            disabled={!supported}
+            onClick={onMicClick}
+            disabled={micBlocked || transcribing || (busy && !recording)}
+            title={
+              micBlocked
+                ? 'Voice needs Chrome or Edge'
+                : recording
+                  ? 'Tap to stop and send'
+                  : transcribing
+                    ? 'Processing your voice…'
+                    : 'Tap to start listening'
+            }
             className={`relative flex h-20 w-20 shrink-0 cursor-pointer items-center justify-center rounded-full border-[3px] transition ${
-              listening
-                ? 'border-indigo-500 bg-indigo-600 text-white shadow-md shadow-indigo-300/40'
-                : 'border-slate-200 bg-slate-50 text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50'
+              recording
+                ? 'border-red-500 bg-red-600 text-white shadow-md shadow-red-300/40'
+                : transcribing
+                  ? 'border-amber-400 bg-amber-500 text-white'
+                  : 'border-slate-200 bg-slate-50 text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50'
             } disabled:cursor-not-allowed disabled:opacity-50`}
           >
-            {listening && (
-              <span className="absolute inset-0 animate-ping rounded-full bg-indigo-400/25" />
+            {recording && (
+              <span className="absolute inset-0 animate-ping rounded-full bg-red-400/30" />
             )}
             <MicIcon className="relative h-8 w-8" />
           </button>
           <p className="mt-2 text-sm font-medium text-slate-900">{statusLabel}</p>
-          {listening && !interim && (
-            <p className="mt-0.5 text-xs text-amber-600">Speak, then pause ~1s</p>
-          )}
-          {(interim || (listening && text)) && (
-            <p className="mt-1 max-w-[220px] text-center text-sm font-medium text-indigo-700 lg:text-left">
-              {interim || text}
+          {micBlocked && (
+            <p className="mt-1 max-w-[220px] text-center text-xs text-red-600 lg:text-left">
+              Mic unavailable — use Chrome or Edge (not Firefox).
             </p>
           )}
-          {lastReply && !listening && !busy && (
+          {recording && interim && (
+            <p className="mt-2 max-w-xs text-center text-sm font-medium text-indigo-800 lg:text-left">
+              &ldquo;{interim}&rdquo;
+            </p>
+          )}
+          {recording && mode === 'whisper' && (
+            <div className="mt-2 w-full max-w-[220px]">
+              <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-red-500 transition-all duration-75"
+                  style={{ width: `${Math.max(8, level)}%` }}
+                />
+              </div>
+              <p className="mt-1 text-center text-xs text-red-600 lg:text-left">
+                {level > 8 ? 'Mic is picking up sound' : 'Speak louder - red bar should move'}
+              </p>
+            </div>
+          )}
+          {lastReply && !micBusy && !busy && (
             <div
               className={`mt-2 max-w-xs rounded-lg border px-2.5 py-2 text-left text-xs ${
                 lastReply.success

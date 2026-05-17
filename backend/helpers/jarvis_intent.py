@@ -10,6 +10,72 @@ _RULE_FIRST_MIN_CONF = 0.88
 
 _RULES: list[tuple[re.Pattern[str], str, float, dict[str, str]]] = []
 
+# LLMs often use alternate slot keys; map them to what actions expect.
+_INTENT_SLOT_ALIASES: dict[str, dict[str, str]] = {
+    "open_app": {
+        "app": "app",
+        "app_name": "app",
+        "application": "app",
+        "program": "app",
+        "software": "app",
+        "name": "app",
+    },
+    "open_path": {
+        "path": "path",
+        "file_path": "path",
+        "folder_path": "path",
+        "location": "path",
+        "directory": "path",
+    },
+    "web_search": {"query": "query", "search": "query", "q": "query", "topic": "query"},
+    "youtube_search": {"query": "query", "song": "query", "search": "query"},
+    "open_url": {"url": "url", "link": "url", "website": "url"},
+    "open_url_search": {"query": "query", "search": "query"},
+    "open_terminal": {"shell": "shell", "terminal": "shell"},
+    "open_folder": {"folder": "folder", "name": "folder"},
+    "write_text": {"content": "content", "text": "content", "path": "path", "filename": "filename"},
+    "run_project": {"path": "path", "folder": "folder"},
+    "create_folder": {
+        "parent": "parent",
+        "path": "parent",
+        "name": "name",
+        "folder_name": "name",
+        "folder": "name",
+    },
+}
+
+
+def _trim_open_app_query(app: str) -> str:
+    """Drop trailing 'and write/run ...' when the user bundles extra steps."""
+    s = " ".join(app.strip().split())
+    m = re.match(
+        r"^(.+?)\s+and\s+(?:run|write|type|execute|create|build|code|open)\b",
+        s,
+        re.I,
+    )
+    return m.group(1).strip() if m else s
+
+
+def normalize_jarvis_slots(intent: str, slots: dict[str, str]) -> dict[str, str]:
+    aliases = _INTENT_SLOT_ALIASES.get(intent)
+    if not aliases:
+        return slots
+    out = dict(slots)
+    for key, value in slots.items():
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        canon = aliases.get(key.lower())
+        if canon and not (out.get(canon) or "").strip():
+            out[canon] = _trim_open_app_query(text) if canon == "app" else text
+    if intent == "open_app" and (out.get("app") or "").strip():
+        from helpers.jarvis_windows import canonical_app_name
+
+        out["app"] = canonical_app_name(_trim_open_app_query(out["app"]))
+    return out
+
 
 def _rule(pattern: str, intent: str, confidence: float = 0.92, **slot_keys: str) -> None:
     _RULES.append((re.compile(pattern, re.I), intent, confidence, slot_keys))
@@ -88,6 +154,24 @@ _rule(
 _rule(r"restart\s+(?:my\s+)?(?:the\s+)?(?:pc|computer|laptop|system)|reboot", "restart", 0.92)
 _rule(r"cancel|stop listening|never mind", "cancel", 0.9)
 _rule(r"help|what can you do|capabilities", "help", 0.95)
+_rule(
+    r"(?:please\s+)?(?:write|type|create)\s+(?P<content>.+?)(?:\s+in\s+it)?\.?\s*$",
+    "write_text",
+    0.88,
+    content="content",
+)
+_rule(
+    r"(?:please\s+)?run\s+(?:the\s+)?backend(?:\s+folder)?\.?\s*$",
+    "run_project",
+    0.92,
+    folder="folder",
+)
+_rule(
+    r"(?:please\s+)?run\s+(?:the\s+)?(?P<folder>[\w./\\-]+?)(?:\s+folder)?\.?\s*$",
+    "run_project",
+    0.86,
+    folder="folder",
+)
 
 
 def _parse_with_llm(text: str) -> JarvisIntent | None:
@@ -130,10 +214,11 @@ def _parse_with_llm(text: str) -> JarvisIntent | None:
                 if v is None:
                     continue
                 slots[str(k).strip()] = str(v).strip()
+        intent_name = str(data.get("intent", "unknown")).strip() or "unknown"
         return JarvisIntent(
-            intent=str(data.get("intent", "unknown")).strip() or "unknown",
+            intent=intent_name,
             confidence=float(data.get("confidence", 0.7)),
-            slots=slots,
+            slots=normalize_jarvis_slots(intent_name, slots),
         )
     except Exception:
         return None
@@ -151,16 +236,69 @@ def _sanitize_llm_intent(intent: JarvisIntent, clean: str) -> JarvisIntent:
             confidence=max(intent.confidence, 0.88),
             slots={"path": pc},
         )
+    if intent.intent == "open_path":
+        from helpers.jarvis_context import resolve_workspace_path
+
+        raw = (intent.slots.get("path") or "").strip()
+        ws = resolve_workspace_path(raw.replace(" folder", "").strip())
+        if ws:
+            return JarvisIntent(
+                intent="open_path",
+                confidence=max(intent.confidence, 0.9),
+                slots={"path": str(ws)},
+            )
+    if intent.intent == "run_project":
+        from helpers.jarvis_context import resolve_workspace_path
+
+        raw = (intent.slots.get("folder") or intent.slots.get("path") or "").strip()
+        ws = resolve_workspace_path(raw.replace(" folder", "").strip())
+        if ws:
+            slots = dict(intent.slots)
+            slots["path"] = str(ws)
+            return JarvisIntent(
+                intent="run_project",
+                confidence=max(intent.confidence, 0.9),
+                slots=slots,
+            )
     return intent
 
 
-def parse_jarvis_intent(text: str) -> JarvisIntent:
+def parse_jarvis_intent(
+    text: str,
+    context: "JarvisSessionContext | None" = None,
+) -> JarvisIntent:
+    from helpers.jarvis_context import context_is_active, parse_followup_intent
+    from schemas.jarvis import JarvisSessionContext
+
     clean = " ".join(text.strip().split())
     if not clean:
         return JarvisIntent(intent="unknown", confidence=0.0)
 
+    if context_is_active(context):
+        follow = parse_followup_intent(clean, context)  # type: ignore[arg-type]
+        if follow:
+            return follow
+
+    from helpers.jarvis_context import _OPEN_IN_EDITOR_RE, _DRIVE_IN_TEXT_RE, resolve_folder_path
+
+    editor = _OPEN_IN_EDITOR_RE.search(clean)
+    if editor:
+        name = editor.group("name").strip()
+        parent = None
+        dm = _DRIVE_IN_TEXT_RE.search(clean)
+        if dm:
+            parent = f"{dm.group('letter').upper()}:\\"
+        folder = resolve_folder_path(name, parent, context if context_is_active(context) else None)
+        if folder:
+            return JarvisIntent(
+                intent="open_app",
+                confidence=0.93,
+                slots={"app": "Visual Studio Code", "path": str(folder)},
+            )
+
     use_llm = os.getenv("JARVIS_USE_LLM", "true").lower() in ("1", "true", "yes")
-    if use_llm:
+    # Groq plan is invoked from process_jarvis_command — avoid duplicate API calls here.
+    if use_llm and not os.getenv("GROQ_API_KEY", "").strip():
         llm = _parse_with_llm(clean)
         if llm and llm.confidence >= 0.65:
             return _sanitize_llm_intent(llm, clean)
@@ -216,7 +354,18 @@ def parse_jarvis_intent(text: str) -> JarvisIntent:
                 )
         if looks_like_web_search(target):
             return JarvisIntent(intent="web_search", confidence=0.85, slots={"query": target})
-        return JarvisIntent(intent="open_app", confidence=0.7, slots={"app": target})
+        from helpers.jarvis_context import resolve_workspace_path
+
+        folder_token = target.lower().replace(" folder", "").strip()
+        ws = resolve_workspace_path(folder_token)
+        if ws:
+            return JarvisIntent(
+                intent="open_path",
+                confidence=0.88,
+                slots={"path": str(ws)},
+            )
+        app = _trim_open_app_query(target)
+        return JarvisIntent(intent="open_app", confidence=0.7, slots={"app": app})
 
     if re.search(r"\b(search|google|look\s*up|find)\b", lower) and not lower.startswith("open "):
         query = re.sub(

@@ -1,30 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-/** Pause this long after last heard words → treat as end of command. */
-const SILENCE_MS = 1600
-/** Restart mic after no-speech / end if user left listening on. */
-const RESTART_MS = 400
+/** After you stop talking, wait this long then send the command. */
+const SILENCE_MS = 1500
+/** Max time with no words before we warn / stop. */
+const NO_SPEECH_GIVE_UP_MS = 12000
 
-function resolveSpeechLang() {
-  const nav = (navigator.language || 'en-US').toLowerCase()
-  if (nav.startsWith('ur')) return 'ur-PK'
-  if (nav.startsWith('en')) return nav.includes('pk') ? 'en-PK' : 'en-US'
-  return 'en-US'
+function cancelAssistantSpeech() {
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel()
+  }
 }
 
-export function useSpeechRecognition({ onResult, onError, lang } = {}) {
+export function useSpeechRecognition({
+  onResult,
+  onError,
+  lang = 'en-US',
+  autoStopOnSilence = false,
+} = {}) {
   const [listening, setListening] = useState(false)
   const [supported, setSupported] = useState(false)
   const [interim, setInterim] = useState('')
+  const [hearing, setHearing] = useState(false)
+  const [micError, setMicError] = useState(null)
+
   const recognitionRef = useRef(null)
   const onResultRef = useRef(onResult)
   const onErrorRef = useRef(onError)
   const pendingTextRef = useRef('')
   const activeRef = useRef(false)
   const silenceTimerRef = useRef(null)
-  const restartTimerRef = useRef(null)
+  const noSpeechTimerRef = useRef(null)
   const finalizedRef = useRef(false)
-  const speechLang = lang || resolveSpeechLang()
+  const speechLang = lang
 
   useEffect(() => {
     onResultRef.current = onResult
@@ -41,70 +48,68 @@ export function useSpeechRecognition({ onResult, onError, lang } = {}) {
     }
   }, [])
 
-  const clearRestartTimer = useCallback(() => {
-    if (restartTimerRef.current) {
-      clearTimeout(restartTimerRef.current)
-      restartTimerRef.current = null
+  const clearNoSpeechTimer = useCallback(() => {
+    if (noSpeechTimerRef.current) {
+      clearTimeout(noSpeechTimerRef.current)
+      noSpeechTimerRef.current = null
     }
   }, [])
 
-  const finalizePending = useCallback(
-    (text) => {
-      const trimmed = (text || pendingTextRef.current).trim()
-      if (!trimmed || finalizedRef.current) return
-      finalizedRef.current = true
-      pendingTextRef.current = ''
-      setInterim('')
-      clearSilenceTimer()
-      clearRestartTimer()
-      activeRef.current = false
-      onResultRef.current?.(trimmed)
-    },
-    [clearSilenceTimer, clearRestartTimer],
-  )
+  const reportError = useCallback((code) => {
+    setMicError(code)
+    onErrorRef.current?.(code)
+  }, [])
 
-  const scheduleSilenceFinalize = useCallback(() => {
+  const finalizeRef = useRef(() => {})
+
+  finalizeRef.current = () => {
+    const trimmed = pendingTextRef.current.trim()
+    if (!trimmed || finalizedRef.current) {
+      return
+    }
+    finalizedRef.current = true
+    activeRef.current = false
+    pendingTextRef.current = ''
+    setInterim('')
+    clearSilenceTimer()
+    clearNoSpeechTimer()
+    try {
+      recognitionRef.current?.stop()
+    } catch {
+      /* ignore */
+    }
+    setListening(false)
+    setHearing(false)
+    setMicError(null)
+    onResultRef.current?.(trimmed)
+  }
+
+  const scheduleFinalizeAfterSilenceRef = useRef(() => {})
+  scheduleFinalizeAfterSilenceRef.current = () => {
     clearSilenceTimer()
     silenceTimerRef.current = setTimeout(() => {
-      finalizePending()
+      finalizeRef.current()
     }, SILENCE_MS)
-  }, [clearSilenceTimer, finalizePending])
+  }
 
-  const startRecognition = useCallback(() => {
-    const recognition = recognitionRef.current
-    if (!recognition || !activeRef.current) return
-    finalizedRef.current = false
-    try {
-      recognition.start()
-    } catch (err) {
-      if (String(err?.message || err).includes('already started')) {
+  const armNoSpeechTimeoutRef = useRef(() => {})
+  armNoSpeechTimeoutRef.current = () => {
+    clearNoSpeechTimer()
+    noSpeechTimerRef.current = setTimeout(() => {
+      if (!activeRef.current) return
+      if (!pendingTextRef.current.trim()) {
+        activeRef.current = false
         try {
-          recognition.stop()
-          setTimeout(() => {
-            if (activeRef.current) {
-              try {
-                recognition.start()
-              } catch {
-                onErrorRef.current?.('start_failed')
-              }
-            }
-          }, 200)
+          recognitionRef.current?.stop()
         } catch {
-          onErrorRef.current?.('already_started')
+          /* ignore */
         }
-      } else {
-        onErrorRef.current?.('start_failed')
+        setListening(false)
+        setHearing(false)
+        reportError('no-speech')
       }
-    }
-  }, [])
-
-  const scheduleRestart = useCallback(() => {
-    clearRestartTimer()
-    if (!activeRef.current) return
-    restartTimerRef.current = setTimeout(() => {
-      if (activeRef.current) startRecognition()
-    }, RESTART_MS)
-  }, [clearRestartTimer, startRecognition])
+    }, NO_SPEECH_GIVE_UP_MS)
+  }
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -113,14 +118,29 @@ export function useSpeechRecognition({ onResult, onError, lang } = {}) {
 
     const recognition = new SpeechRecognition()
     recognition.lang = speechLang
-    // Single-utterance mode is far more reliable in Chrome/Edge than continuous.
-    recognition.continuous = false
+    recognition.continuous = true
     recognition.interimResults = true
     recognition.maxAlternatives = 1
 
     recognition.onstart = () => {
       setListening(true)
+      setMicError(null)
       finalizedRef.current = false
+      armNoSpeechTimeoutRef.current()
+    }
+
+    recognition.onsoundstart = () => {
+      setHearing(true)
+      setMicError(null)
+    }
+
+    recognition.onsoundend = () => {
+      setHearing(false)
+    }
+
+    recognition.onspeechstart = () => {
+      setHearing(true)
+      clearNoSpeechTimer()
     }
 
     recognition.onresult = (event) => {
@@ -131,54 +151,64 @@ export function useSpeechRecognition({ onResult, onError, lang } = {}) {
         if (event.results[i].isFinal) finalText += part
         else interimText += part
       }
+      const combined = (finalText + interimText).trim()
+      if (!combined) return
 
-      const live = (finalText + interimText).trim()
-      if (live) {
-        pendingTextRef.current = live
-        setInterim(live)
-        scheduleSilenceFinalize()
-      }
-
-      if (finalText.trim()) {
-        clearSilenceTimer()
-        finalizePending(finalText.trim())
-        try {
-          recognition.stop()
-        } catch {
-          /* ignore */
-        }
+      pendingTextRef.current = combined
+      setInterim(combined)
+      setHearing(true)
+      setMicError(null)
+      clearNoSpeechTimer()
+      if (autoStopOnSilence) {
+        scheduleFinalizeAfterSilenceRef.current()
       }
     }
 
     recognition.onerror = (event) => {
       const code = event.error || 'speech_error'
+      if (code === 'aborted') return
+
       if (code === 'no-speech') {
-        const leftover = pendingTextRef.current.trim()
-        if (leftover) {
-          finalizePending(leftover)
-        } else if (activeRef.current) {
-          scheduleRestart()
+        if (pendingTextRef.current.trim()) {
+          finalizeRef.current()
         }
         return
       }
-      if (code === 'aborted') return
+
       setListening(false)
-      onErrorRef.current?.(code)
-      if (activeRef.current && code === 'network') {
-        activeRef.current = false
+      setHearing(false)
+      activeRef.current = false
+
+      if (code === 'not-allowed') {
+        reportError('not-allowed')
+        return
       }
+      if (code === 'network' || code === 'service-not-available') {
+        reportError('network')
+        return
+      }
+      if (code === 'audio-capture') {
+        reportError('audio-capture')
+        return
+      }
+      reportError(code)
     }
 
     recognition.onend = () => {
       setListening(false)
-      if (!finalizedRef.current) {
+      setHearing(false)
+      if (activeRef.current && !finalizedRef.current) {
         const leftover = pendingTextRef.current.trim()
         if (leftover) {
-          finalizePending(leftover)
+          finalizeRef.current()
+          return
         }
-      }
-      if (activeRef.current) {
-        scheduleRestart()
+        try {
+          recognition.start()
+        } catch {
+          activeRef.current = false
+          reportError('start_failed')
+        }
       }
     }
 
@@ -186,7 +216,7 @@ export function useSpeechRecognition({ onResult, onError, lang } = {}) {
     return () => {
       activeRef.current = false
       clearSilenceTimer()
-      clearRestartTimer()
+      clearNoSpeechTimer()
       try {
         recognition.abort()
       } catch {
@@ -194,47 +224,65 @@ export function useSpeechRecognition({ onResult, onError, lang } = {}) {
       }
       recognitionRef.current = null
     }
-  }, [
-    speechLang,
-    clearSilenceTimer,
-    clearRestartTimer,
-    finalizePending,
-    scheduleSilenceFinalize,
-    scheduleRestart,
-    startRecognition,
-  ])
+  }, [speechLang, autoStopOnSilence, clearSilenceTimer, clearNoSpeechTimer, reportError])
 
-  const ensureMicPermission = useCallback(async () => {
-    if (!navigator.mediaDevices?.getUserMedia) return true
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      stream.getTracks().forEach((t) => t.stop())
-      return true
-    } catch {
-      onErrorRef.current?.('not-allowed')
-      return false
-    }
-  }, [])
-
-  const start = useCallback(async () => {
-    if (!recognitionRef.current) return
+  const start = useCallback(() => {
+    const recognition = recognitionRef.current
+    if (!recognition) return
     if (activeRef.current) return
-    const allowed = await ensureMicPermission()
-    if (!allowed) return
+
+    cancelAssistantSpeech()
+    setMicError(null)
     activeRef.current = true
     pendingTextRef.current = ''
     setInterim('')
+    setHearing(false)
     finalizedRef.current = false
-    startRecognition()
-  }, [ensureMicPermission, startRecognition])
+
+    try {
+      recognition.start()
+    } catch (err) {
+      const msg = String(err?.message || err)
+      if (msg.includes('already started')) {
+        try {
+          recognition.stop()
+        } catch {
+          /* ignore */
+        }
+        setTimeout(() => {
+          if (!activeRef.current) return
+          try {
+            recognitionRef.current?.start()
+          } catch {
+            activeRef.current = false
+            reportError('start_failed')
+          }
+        }, 300)
+      } else {
+        activeRef.current = false
+        reportError('start_failed')
+      }
+    }
+  }, [reportError])
 
   const stop = useCallback(() => {
     activeRef.current = false
     clearSilenceTimer()
-    clearRestartTimer()
+    clearNoSpeechTimer()
     const leftover = pendingTextRef.current.trim()
     if (leftover && !finalizedRef.current) {
-      finalizePending(leftover)
+      finalizedRef.current = true
+      pendingTextRef.current = ''
+      setInterim('')
+      setListening(false)
+      setHearing(false)
+      try {
+        recognitionRef.current?.stop()
+      } catch {
+        /* ignore */
+      }
+      onResultRef.current?.(leftover)
+      return
     }
     try {
       recognitionRef.current?.stop()
@@ -242,8 +290,18 @@ export function useSpeechRecognition({ onResult, onError, lang } = {}) {
       /* ignore */
     }
     setListening(false)
+    setHearing(false)
     setInterim('')
-  }, [clearSilenceTimer, clearRestartTimer, finalizePending])
+  }, [clearSilenceTimer, clearNoSpeechTimer])
 
-  return { listening, supported, interim, start, stop, ensureMicPermission, speechLang }
+  return {
+    listening,
+    supported,
+    interim,
+    hearing,
+    micError,
+    start,
+    stop,
+    speechLang,
+  }
 }

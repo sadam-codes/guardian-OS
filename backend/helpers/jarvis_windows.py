@@ -1,10 +1,44 @@
 """Dynamic Windows app launcher — discovers apps via Start menu."""
 
+from __future__ import annotations
+
 import os
 import re
+import shutil
 import subprocess
-import sys
 import time
+
+# Spoken / Groq shortcuts -> Windows Start menu name (case as shown in Start)
+_APP_ALIASES: dict[str, str] = {
+    "vs code": "Visual Studio Code",
+    "vscode": "Visual Studio Code",
+    "vsc": "Visual Studio Code",
+    "vs": "Visual Studio Code",
+    "visual studio": "Visual Studio Code",
+    "word": "Word",
+    "ms word": "Word",
+    "excel": "Excel",
+    "chrome": "Google Chrome",
+    "google chrome": "Google Chrome",
+    "edge": "Microsoft Edge",
+    "ms edge": "Microsoft Edge",
+    "firefox": "Firefox",
+    "notepad": "Notepad",
+    "calc": "Calculator",
+    "calculator": "Calculator",
+    "settings": "Settings",
+    "windows settings": "Settings",
+    "task manager": "Task Manager",
+    "spotify": "Spotify",
+    "discord": "Discord",
+    "teams": "Microsoft Teams",
+    "zoom": "Zoom",
+    "cursor": "Cursor",
+    "powershell": "Windows PowerShell",
+    "pwsh": "PowerShell",
+    "terminal": "Windows Terminal",
+    "wt": "Windows Terminal",
+}
 
 _LAUNCH_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
@@ -72,6 +106,18 @@ exit 0
 """
 
 
+def canonical_app_name(raw: str) -> str:
+    """Map nicknames (vs code, vscode) to the Start menu application name."""
+    name = " ".join(raw.strip().split())
+    key = name.lower()
+    if key in _APP_ALIASES:
+        return _APP_ALIASES[key]
+    for alias, full in sorted(_APP_ALIASES.items(), key=lambda item: -len(item[0])):
+        if alias in key:
+            return full
+    return name
+
+
 def normalize_app_query(raw: str) -> str:
     name = " ".join(raw.strip().split()).lower()
     for prefix in ("please ", "can you ", "could you "):
@@ -82,14 +128,42 @@ def normalize_app_query(raw: str) -> str:
             name = name[len(prefix) :]
     name = re.sub(r"\b(window|windows)\s+", "", name)
     name = re.sub(r"\s+(app|application|program|software)$", "", name)
-    return name.strip()
+    return canonical_app_name(name.strip()).lower()
+
+
+def _launch_vscode_cli() -> tuple[bool, str] | None:
+    for exe in ("code", "code.cmd"):
+        path = shutil.which(exe)
+        if path:
+            subprocess.Popen([path])  # noqa: S603
+            return True, "Visual Studio Code"
+    return None
+
+
+def _is_vscode_query(query: str) -> bool:
+    low = query.lower()
+    return any(
+        token in low
+        for token in (
+            "visual studio code",
+            "vs code",
+            "vscode",
+            "vsc",
+        )
+    )
 
 
 def launch_windows_app(raw: str) -> tuple[bool, str]:
     """Launch an installed Windows app. Returns (success, display_label)."""
+    display = canonical_app_name(raw)
     query = normalize_app_query(raw)
     if not query:
         return False, ""
+
+    if _is_vscode_query(query) or _is_vscode_query(display):
+        cli = _launch_vscode_cli()
+        if cli:
+            return cli
 
     env = {**os.environ, "JARVIS_APP_QUERY": query}
     try:
@@ -119,7 +193,11 @@ def launch_windows_app(raw: str) -> tuple[bool, str]:
             label = lines[-1]
 
     if proc.returncode != 0:
-        return False, label
+        if _is_vscode_query(query):
+            cli = _launch_vscode_cli()
+            if cli:
+                return cli
+        return False, display or label
 
     time.sleep(0.3)
-    return True, label
+    return True, display or label

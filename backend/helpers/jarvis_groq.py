@@ -6,6 +6,8 @@ import urllib.request
 from pathlib import Path
 
 from dotenv import load_dotenv
+from helpers.jarvis_intent import normalize_jarvis_slots
+from helpers.jarvis_plan_sanitize import sanitize_plan_steps
 from schemas.jarvis import JarvisIntent
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -69,35 +71,29 @@ def _parse_json_content(raw: str) -> dict:
     return json.loads(text)
 
 
-def parse_intent_with_groq(text: str) -> JarvisIntent | None:
-    system = (
-        "You classify short Windows voice commands. Reply with JSON only (no markdown): "
-        '{"intent":"...","confidence":0-1,"slots":{...}}. '
-        "Intents: greet, time, date, lock, volume_up, volume_down, volume_mute, open_app, open_url, "
-        "web_search, open_folder, open_path, open_terminal, minimize_all, screenshot, shutdown, restart, "
-        "youtube_search, help, acknowledge, cancel, unknown. "
-        "Rules: Use open_path with slots.path for any local path, drive, or folder (examples: C:\\\\Users, "
-        "D:\\\\, E:\\\\work\\\\notes.txt, Desktop folder as a path if user gives a path). "
-        "Use open_terminal with slots.shell (wt | cmd | powershell) for terminal, CMD, command prompt, "
-        "PowerShell, pwsh, or Windows Terminal. "
-        "Use web_search only for real internet questions or when the user clearly wants Google/the web — "
-        "never for opening shells, drives, or files. "
-        "open_app: start menu apps only when it is clearly an application name, not a path. "
-        "Understand Roman Urdu / mixed phrases the same way (e.g. kholo, jao, c drive, terminal chalao)."
-    )
-    user = f'Command: "{text}"'
-    raw = _chat(
-        [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        max_tokens=180,
-        temperature=0.1,
-    )
-    if not raw:
-        return None
-    try:
-        data = _parse_json_content(raw)
+_GROQ_INTENTS_DOC = (
+    "Intents: greet, time, date, lock, volume_up, volume_down, volume_mute, open_app, open_url, "
+    "web_search, open_folder, open_path, open_terminal, open_terminal_here, create_folder, write_text, "
+    "run_project, minimize_all, screenshot, shutdown, restart, youtube_search, help, acknowledge, cancel, unknown. "
+    "open_path: slots.path = Windows path or drive (C:\\\\, D:\\\\work, C:\\\\Users\\\\name). "
+    "create_folder: slots.parent = existing folder path; slots.name = new folder name "
+    "(example: parent C:\\\\, name sadam -> C:\\\\sadam). "
+    "open_app: slots.app = Windows Start menu app name; optional slots.path = folder to open in that app "
+    "(example: Visual Studio Code + path C:\\\\sadam). "
+    "To open an existing folder on C: use open_path with C:\\\\foldername — NOT open_folder with name sadam. "
+    "open_terminal: slots.shell = wt | cmd | powershell. "
+    "write_text: slots.content = text to write; optional slots.path. "
+    "run_project: slots.path or slots.folder = project directory. "
+    "web_search/youtube_search: slots.query. Never use web_search for drives, folders, or shells. "
+    "For YouTube with a song use youtube_search (not open_url). For open youtube only use open_app with slots.app=YouTube. "
+    "Roman Urdu OK (kholo, banao, folder banao)."
+)
+
+
+def _steps_from_groq_payload(data: dict) -> list[JarvisIntent]:
+    steps_raw = data.get("steps")
+    if not isinstance(steps_raw, list) or not steps_raw:
+        intent_name = str(data.get("intent", "unknown")).strip() or "unknown"
         raw_slots = data.get("slots") or {}
         slots: dict[str, str] = {}
         if isinstance(raw_slots, dict):
@@ -105,13 +101,72 @@ def parse_intent_with_groq(text: str) -> JarvisIntent | None:
                 if v is None:
                     continue
                 slots[str(k).strip()] = str(v).strip()
-        return JarvisIntent(
-            intent=str(data.get("intent", "unknown")).strip() or "unknown",
-            confidence=float(data.get("confidence", 0.75)),
-            slots=slots,
+        conf = float(data.get("confidence", 0.75))
+        return [
+            JarvisIntent(
+                intent=intent_name,
+                confidence=conf,
+                slots=normalize_jarvis_slots(intent_name, slots),
+            )
+        ]
+
+    out: list[JarvisIntent] = []
+    conf = float(data.get("confidence", 0.85))
+    for item in steps_raw[:8]:
+        if not isinstance(item, dict):
+            continue
+        intent_name = str(item.get("intent", "")).strip()
+        if not intent_name:
+            continue
+        raw_slots = item.get("slots") or {}
+        slots: dict[str, str] = {}
+        if isinstance(raw_slots, dict):
+            for k, v in raw_slots.items():
+                if v is None:
+                    continue
+                slots[str(k).strip()] = str(v).strip()
+        out.append(
+            JarvisIntent(
+                intent=intent_name,
+                confidence=conf,
+                slots=normalize_jarvis_slots(intent_name, slots),
+            )
         )
+    return out
+
+
+def parse_steps_with_groq(text: str) -> list[JarvisIntent] | None:
+    """Ask Groq for an ordered plan (one or more steps). Fully dynamic — no hardcoded phrases."""
+    system = (
+        "You convert Windows voice commands into an execution plan. Reply with JSON only (no markdown). "
+        'Format: {"confidence":0-1,"steps":[{"intent":"...","slots":{...}}, ...]}. '
+        "Use multiple steps when the user chains actions with and/then/phir/aur (e.g. open C drive AND create folder sadam). "
+        "Order steps logically. One action per step. "
+        + _GROQ_INTENTS_DOC
+    )
+    user = f'Command: "{text}"'
+    raw = _chat(
+        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        max_tokens=500,
+        temperature=0.05,
+    )
+    if not raw:
+        return None
+    try:
+        data = _parse_json_content(raw)
+        steps = _steps_from_groq_payload(data)
+        if steps:
+            steps = sanitize_plan_steps(steps)
+        return steps or None
     except (json.JSONDecodeError, TypeError, ValueError):
         return None
+
+
+def parse_intent_with_groq(text: str) -> JarvisIntent | None:
+    steps = parse_steps_with_groq(text)
+    if steps:
+        return steps[0]
+    return None
 
 
 def generate_spoken_reply(
@@ -125,9 +180,9 @@ def generate_spoken_reply(
 ) -> str | None:
     name_line = f"The user's first name is {user_name.split()[0]}." if user_name and user_name.strip() else ""
     system = (
-        f"You are {assistant_name}, a calm male voice assistant on a Windows PC. "
+        f"You are {assistant_name}, a calm female voice assistant on a Windows PC. "
         "Write exactly one or two short sentences to be read aloud. "
-        "Sound natural and direct — like a man speaking, not robotic. "
+        "Sound natural and warm — like a woman speaking, not robotic. "
         "No markdown, bullet points, emoji, or quotes around the whole reply. "
         "Confirm what you did using the action result; if it failed, say so briefly."
     )
