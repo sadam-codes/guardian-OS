@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import time
 
+from helpers.jarvis_focus import focus_app_by_name
+
 # Spoken / Groq shortcuts -> Windows Start menu name (case as shown in Start)
 _APP_ALIASES: dict[str, str] = {
     "vs code": "Visual Studio Code",
@@ -33,6 +35,8 @@ _APP_ALIASES: dict[str, str] = {
     "discord": "Discord",
     "teams": "Microsoft Teams",
     "zoom": "Zoom",
+    "whatsapp": "WhatsApp",
+    "whats app": "WhatsApp",
     "cursor": "Cursor",
     "powershell": "Windows PowerShell",
     "pwsh": "PowerShell",
@@ -136,6 +140,7 @@ def _launch_vscode_cli() -> tuple[bool, str] | None:
         path = shutil.which(exe)
         if path:
             subprocess.Popen([path])  # noqa: S603
+            focus_app_by_name("Visual Studio Code")
             return True, "Visual Studio Code"
     return None
 
@@ -200,4 +205,5 @@ def launch_windows_app(raw: str) -> tuple[bool, str]:
         return False, display or label
 
     time.sleep(0.3)
+    focus_app_by_name(display or label)
     return True, display or label

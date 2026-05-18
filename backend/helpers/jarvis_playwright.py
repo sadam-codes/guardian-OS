@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 from urllib.parse import quote
 
+from helpers.jarvis_focus import focus_browser_window
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -74,6 +76,7 @@ class _BrowserSession:
             page = self._ensure_page_locked()
             page.goto(url, wait_until="domcontentloaded", timeout=60_000)
             page.bring_to_front()
+            focus_browser_window()
 
     def dismiss_youtube_consent(self, page: Page) -> None:
         for name in ("Accept all", "Reject all", "I agree", "Accept", "Tout accepter"):
@@ -91,6 +94,7 @@ class _BrowserSession:
             url = f"https://www.youtube.com/results?search_query={quote(query.strip())}"
             page.goto(url, wait_until="domcontentloaded", timeout=60_000)
             page.bring_to_front()
+            focus_browser_window()
             page.wait_for_timeout(1500)
             self.dismiss_youtube_consent(page)
 
@@ -156,6 +160,7 @@ def _fallback_open_url(url: str, playwright_err: str | None = None) -> tuple[boo
     try:
         if sys.platform == "win32":
             os.startfile(url)  # noqa: S606
+            focus_browser_window()
         else:
             import webbrowser
 

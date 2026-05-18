@@ -73,7 +73,7 @@ def _parse_json_content(raw: str) -> dict:
 
 _GROQ_INTENTS_DOC = (
     "Intents: greet, time, date, lock, volume_up, volume_down, volume_mute, open_app, open_url, "
-    "web_search, open_folder, open_path, open_terminal, open_terminal_here, create_folder, write_text, "
+    "web_search, open_folder, open_path, open_terminal, open_terminal_here, create_folder, write_text, type_text, "
     "run_project, minimize_all, screenshot, shutdown, restart, youtube_search, help, acknowledge, cancel, unknown. "
     "open_path: slots.path = Windows path or drive (C:\\\\, D:\\\\work, C:\\\\Users\\\\name). "
     "create_folder: slots.parent = existing folder path; slots.name = new folder name "
@@ -82,7 +82,11 @@ _GROQ_INTENTS_DOC = (
     "(example: Visual Studio Code + path C:\\\\sadam). "
     "To open an existing folder on C: use open_path with C:\\\\foldername — NOT open_folder with name sadam. "
     "open_terminal: slots.shell = wt | cmd | powershell. "
-    "write_text: slots.content = text to write; optional slots.path. "
+    "write_text: ONLY for creating a text/code file in VS Code, Notepad, or Cursor (slots.content, optional slots.path). "
+    "type_text: type into a chat app already open or opened in a prior step — WhatsApp, Telegram, Discord, Teams, Slack. "
+    "type_text slots: content = message body; recipient = contact name; send = true to press Enter and send. "
+    "For 'open WhatsApp and send hello to Manzar bhai' use open_app(WhatsApp) then type_text(recipient=Manzar bhai, content=hello, send=true). "
+    "For 'write message to X' without send, omit send or set send=false. NEVER write_text or Visual Studio Code for chat apps. "
     "run_project: slots.path or slots.folder = project directory. "
     "web_search/youtube_search: slots.query. Never use web_search for drives, folders, or shells. "
     "For YouTube with a song use youtube_search (not open_url). For open youtube only use open_app with slots.app=YouTube. "

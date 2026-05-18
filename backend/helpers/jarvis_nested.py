@@ -11,9 +11,11 @@ from pathlib import Path
 
 from helpers.jarvis_context import resolve_run_folder, resolve_workspace_path
 from helpers.jarvis_local import launch_shell, resolve_existing_path
+from helpers.jarvis_messaging import parse_message_slots, should_type_not_write
+from helpers.jarvis_type import action_type_text
 import os
 
-from schemas.jarvis import JarvisActionResult, JarvisIntent
+from schemas.jarvis import JarvisActionResult, JarvisIntent, JarvisSessionContext
 
 ALLOW_OS_CONTROL = os.getenv("JARVIS_ALLOW_OS", "true").lower() in ("1", "true", "yes")
 
@@ -58,13 +60,16 @@ def _pick_write_dir(intent: JarvisIntent) -> Path:
 
 def _open_in_editor(file_path: Path, app_hint: str | None) -> None:
     code = shutil.which("code") or shutil.which("cursor")
-    if code and (_is_editor_app(app_hint) or True):
+    if code and _is_editor_app(app_hint):
         subprocess.Popen([code, str(file_path)], cwd=str(file_path.parent))  # noqa: S603
         return
     os.startfile(file_path)  # noqa: S606
 
 
-def action_write_text(intent: JarvisIntent) -> JarvisActionResult:
+def action_write_text(
+    intent: JarvisIntent,
+    ctx: JarvisSessionContext | None = None,
+) -> JarvisActionResult:
     blocked = _require_os()
     if blocked:
         return blocked
@@ -73,7 +78,20 @@ def action_write_text(intent: JarvisIntent) -> JarvisActionResult:
     if not content:
         return JarvisActionResult(False, "What should I write?", "write_text")
 
-    app_hint = intent.slots.get("app")
+    app_hint = intent.slots.get("app") or (ctx.last_app if ctx else None)
+    if should_type_not_write(app=app_hint, content=content):
+        slots = dict(intent.slots)
+        slots["app"] = app_hint or slots.get("app") or ""
+        recipient, body, auto_send = parse_message_slots(content)
+        if recipient:
+            slots["recipient"] = recipient
+            slots["content"] = body
+        if auto_send:
+            slots["send"] = "true"
+        return action_type_text(
+            JarvisIntent(intent="type_text", confidence=intent.confidence, slots=slots),
+            ctx,
+        )
     directory = _pick_write_dir(intent)
     directory.mkdir(parents=True, exist_ok=True)
 

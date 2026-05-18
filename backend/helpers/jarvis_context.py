@@ -7,6 +7,7 @@ import re
 import time
 from pathlib import Path
 
+from helpers.jarvis_messaging import is_messaging_app, looks_like_chat_message, parse_message_slots
 from schemas.jarvis import JarvisIntent, JarvisSessionContext
 
 CONTEXT_TTL_SEC = int(os.getenv("JARVIS_CONTEXT_TTL_SEC", "600"))
@@ -187,6 +188,15 @@ def parse_followup_intent(text: str, ctx: JarvisSessionContext) -> JarvisIntent 
             slots["path"] = ctx.last_path
         if ctx.last_app:
             slots["app"] = ctx.last_app
+        app = ctx.last_app or ""
+        if is_messaging_app(app) or looks_like_chat_message(content):
+            recipient, body, auto_send = parse_message_slots(content)
+            if recipient:
+                slots["recipient"] = recipient
+                slots["content"] = body
+            if auto_send:
+                slots["send"] = "true"
+            return JarvisIntent(intent="type_text", confidence=0.92, slots=slots)
         return JarvisIntent(intent="write_text", confidence=0.92, slots=slots)
 
     if _TERMINAL_HERE_RE.match(clean):
@@ -242,7 +252,7 @@ def update_context_after_action(
             or target_label
             or out.last_app
         )
-    if intent.intent in ("open_path", "open_folder", "run_project", "write_text", "open_terminal_here"):
+    if intent.intent in ("open_path", "open_folder", "run_project", "write_text", "type_text", "open_terminal_here"):
         path = resolved_path or intent.slots.get("path") or out.last_path
         if path:
             out.last_path = str(Path(path).resolve()) if Path(path).exists() else path

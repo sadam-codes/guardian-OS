@@ -34,6 +34,16 @@ _INTENT_SLOT_ALIASES: dict[str, dict[str, str]] = {
     "open_terminal": {"shell": "shell", "terminal": "shell"},
     "open_folder": {"folder": "folder", "name": "folder"},
     "write_text": {"content": "content", "text": "content", "path": "path", "filename": "filename"},
+    "type_text": {
+        "content": "content",
+        "text": "content",
+        "message": "content",
+        "recipient": "recipient",
+        "contact": "recipient",
+        "to": "recipient",
+        "app": "app",
+        "send": "send",
+    },
     "run_project": {"path": "path", "folder": "folder"},
     "create_folder": {
         "parent": "parent",

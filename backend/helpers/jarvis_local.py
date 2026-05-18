@@ -235,6 +235,8 @@ def _norm_path_str(raw: str) -> str:
 
 def launch_shell(shell: str) -> tuple[bool, str]:
     """Start Windows Terminal, PowerShell, or CMD. Returns (ok, label)."""
+    from helpers.jarvis_focus import focus_app_by_name
+
     shell = (shell or "wt").lower()
     if shell == "cmd":
         order = ["cmd"]
@@ -249,7 +251,16 @@ def launch_shell(shell: str) -> tuple[bool, str]:
             import subprocess
 
             subprocess.Popen([exe])
-            return True, Path(exe).name
+            label = Path(exe).name
+            focus_name = {
+                "wt": "Windows Terminal",
+                "wt.exe": "Windows Terminal",
+                "pwsh": "PowerShell",
+                "powershell": "Windows PowerShell",
+                "cmd": "Command Prompt",
+            }.get(name.lower(), label)
+            focus_app_by_name(focus_name)
+            return True, label
 
     return False, shell
 

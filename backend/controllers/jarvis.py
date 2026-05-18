@@ -37,6 +37,7 @@ def get_capabilities() -> JarvisCapabilitiesResponse:
                 "screenshot",
                 "create_folder",
                 "write_text",
+                "type_text",
                 "run_project",
                 "compound",
                 "open_terminal_here",

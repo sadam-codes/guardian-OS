@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from helpers.jarvis_context import resolve_folder_path
+from helpers.jarvis_messaging import is_messaging_app, looks_like_chat_message, parse_message_slots
 from schemas.jarvis import JarvisIntent
 
 _BUILTIN_FOLDERS = frozenset({"desktop", "documents", "downloads", "home", "pictures"})
@@ -102,7 +103,45 @@ def sanitize_plan_steps(steps: list[JarvisIntent]) -> list[JarvisIntent]:
 
         fixed.append(step)
 
-    return _dedupe_steps(fixed)
+    return _dedupe_steps(_rewrite_messaging_steps(fixed))
+
+
+def _rewrite_messaging_steps(steps: list[JarvisIntent]) -> list[JarvisIntent]:
+    """write_text after WhatsApp means type in chat — not create a file in VS Code."""
+    out: list[JarvisIntent] = []
+    last_app: str | None = None
+
+    for step in steps:
+        if step.intent == "open_app":
+            last_app = step.slots.get("app") or last_app
+            out.append(step)
+            continue
+
+        if step.intent == "write_text":
+            app = (step.slots.get("app") or last_app or "").strip()
+            content = (step.slots.get("content") or step.slots.get("text") or "").strip()
+            if is_messaging_app(app) or looks_like_chat_message(content):
+                slots = dict(step.slots)
+                if app:
+                    slots["app"] = app
+                recipient, body, auto_send = parse_message_slots(content)
+                if recipient:
+                    slots["recipient"] = recipient
+                    slots["content"] = body
+                if auto_send:
+                    slots["send"] = "true"
+                out.append(
+                    JarvisIntent(
+                        intent="type_text",
+                        confidence=step.confidence,
+                        slots=slots,
+                    )
+                )
+                continue
+
+        out.append(step)
+
+    return out
 
 
 def _dedupe_steps(steps: list[JarvisIntent]) -> list[JarvisIntent]:

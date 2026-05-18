@@ -19,6 +19,7 @@ from helpers.jarvis_gui import (
 )
 from helpers.jarvis_context import resolve_folder_path
 from helpers.jarvis_local import launch_shell, resolve_existing_path
+from helpers.jarvis_focus import bring_window_to_front, focus_app_by_name
 from helpers.jarvis_playwright import jarvis_browser_goto, jarvis_youtube_play
 from helpers.jarvis_web import friendly_url_label, google_search_url, looks_like_web_search, resolve_web_open
 from helpers.jarvis_nested import (
@@ -27,6 +28,7 @@ from helpers.jarvis_nested import (
     action_run_project,
     action_write_text,
 )
+from helpers.jarvis_type import action_type_text
 from helpers.jarvis_windows import canonical_app_name, launch_windows_app
 from schemas.jarvis import JarvisActionResult, JarvisIntent, JarvisSessionContext
 
@@ -84,7 +86,7 @@ def _action_help(_: JarvisIntent) -> JarvisActionResult:
         "Websites and Google search use Playwright (install: pip install playwright && playwright install chromium). "
         "YouTube songs: Playwright opens results and clicks the first video to play. "
         "Volume, desktop, and screenshots use PyAutoGUI when available. "
-        "Nested commands: open an app or folder, then say write hello world, run it, or run backend folder. "
+        "Nested commands: open VS Code then write hello world; open WhatsApp then type a message to a contact. "
         "Say clear context to reset. Deep in-app UI control is still limited.",
         "help",
     )
@@ -194,6 +196,7 @@ def _action_open_path(intent: JarvisIntent) -> JarvisActionResult:
         return JarvisActionResult(False, f"I cannot find that path: {raw}", "open_path")
     try:
         os.startfile(path)  # noqa: S606
+        bring_window_to_front(["File Explorer", path.name])
     except OSError:
         return JarvisActionResult(False, f"I could not open: {path}", "open_path")
     return JarvisActionResult(True, f"Opening {path}.", "open_path", target_label=str(path))
@@ -254,6 +257,7 @@ def _action_open_app(intent: JarvisIntent) -> JarvisActionResult:
             if code:
                 target = str(p if p.is_dir() else p.parent)
                 subprocess.Popen([code, target])  # noqa: S603
+                focus_app_by_name(raw)
                 label = raw if not str(raw).lower().startswith("http") else "Visual Studio Code"
                 return JarvisActionResult(
                     True,
@@ -383,6 +387,7 @@ def _action_open_folder(intent: JarvisIntent) -> JarvisActionResult:
     if not path or not path.exists():
         return JarvisActionResult(False, f"Folder '{folder_key}' not found.", "open_folder")
     os.startfile(path)  # noqa: S606
+    bring_window_to_front(["File Explorer", folder_key.title()])
     return JarvisActionResult(
         True, f"Opening {folder_key}.", "open_folder", target_label=folder_key
     )
@@ -500,7 +505,6 @@ _HANDLERS: dict[str, Callable[[JarvisIntent], JarvisActionResult]] = {
     "shutdown": _action_shutdown,
     "restart": _action_restart,
     "unknown": _action_unknown,
-    "write_text": action_write_text,
     "open_terminal_here": action_open_terminal_here,
     "clear_context": action_clear_context,
 }
@@ -513,5 +517,9 @@ def execute_jarvis_intent(
 ) -> JarvisActionResult:
     if intent.intent == "run_project":
         return action_run_project(intent, context)
+    if intent.intent == "type_text":
+        return action_type_text(intent, context)
+    if intent.intent == "write_text":
+        return action_write_text(intent, context)
     handler = _HANDLERS.get(intent.intent, _action_unknown)
     return handler(intent)

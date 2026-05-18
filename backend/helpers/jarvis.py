@@ -54,6 +54,7 @@ def _personalize_message(
         "create_folder": f"Okay {name}, {base.lower()}.",
         "open_terminal": f"Okay {name}, opening the terminal.",
         "write_text": f"Okay {name}, {base.lower()}.",
+        "type_text": f"Okay {name}, {base.lower()}.",
         "run_project": f"Okay {name}, {base.lower()}.",
         "open_terminal_here": f"Okay {name}, {base.lower()}.",
         "clear_context": f"Okay {name}, starting fresh.",
