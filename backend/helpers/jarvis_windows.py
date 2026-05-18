@@ -1,4 +1,4 @@
-"""Dynamic Windows app launcher — discovers apps via Start menu."""
+"""Dynamic Windows app launcher — Start menu, shell folders, shortcuts."""
 
 from __future__ import annotations
 
@@ -8,40 +8,29 @@ import shutil
 import subprocess
 import time
 
-from helpers.jarvis_focus import focus_app_by_name
+from helpers.jarvis_focus import focus_app_by_name, focus_browser_window
+from helpers.jarvis_shell import try_open_shell_target
 
-# Spoken / Groq shortcuts -> Windows Start menu name (case as shown in Start)
-_APP_ALIASES: dict[str, str] = {
+# Only nicknames that differ from Start menu / shell names (not a full app list).
+_APP_NICKNAMES: dict[str, str] = {
     "vs code": "Visual Studio Code",
     "vscode": "Visual Studio Code",
     "vsc": "Visual Studio Code",
-    "vs": "Visual Studio Code",
-    "visual studio": "Visual Studio Code",
-    "word": "Word",
+    "visual studio code": "Visual Studio Code",
     "ms word": "Word",
-    "excel": "Excel",
-    "chrome": "Google Chrome",
     "google chrome": "Google Chrome",
-    "edge": "Microsoft Edge",
     "ms edge": "Microsoft Edge",
-    "firefox": "Firefox",
-    "notepad": "Notepad",
-    "calc": "Calculator",
-    "calculator": "Calculator",
-    "settings": "Settings",
     "windows settings": "Settings",
-    "task manager": "Task Manager",
-    "spotify": "Spotify",
-    "discord": "Discord",
-    "teams": "Microsoft Teams",
-    "zoom": "Zoom",
-    "whatsapp": "WhatsApp",
     "whats app": "WhatsApp",
-    "cursor": "Cursor",
-    "powershell": "Windows PowerShell",
-    "pwsh": "PowerShell",
-    "terminal": "Windows Terminal",
-    "wt": "Windows Terminal",
+    "insta": "Instagram",
+    "ig": "Instagram",
+    "browser": "__jarvis_browser__",
+    "web browser": "__jarvis_browser__",
+    "the browser": "__jarvis_browser__",
+    "my browser": "__jarvis_browser__",
+    "internet": "__jarvis_browser__",
+    "the internet": "__jarvis_browser__",
+    "default browser": "__jarvis_browser__",
 }
 
 _LAUNCH_SCRIPT = r"""
@@ -91,33 +80,29 @@ if ($exe) {
     exit 0
 }
 
-# Let Windows resolve the name (chrome, notepad, code, etc.)
 $p = Start-Process -FilePath $q -PassThru -ErrorAction SilentlyContinue
 if ($p) {
     Write-Output $q
     exit 0
 }
 
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = 'cmd.exe'
-$psi.Arguments = '/c start "" ' + $q
-$psi.UseShellExecute = $true
-$psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-[System.Diagnostics.Process]::Start($psi) | Out-Null
-Start-Sleep -Milliseconds 500
-Write-Output $q
-exit 0
+exit 1
 """
 
 
 def canonical_app_name(raw: str) -> str:
-    """Map nicknames (vs code, vscode) to the Start menu application name."""
+    """Map common nicknames; everything else passes through for dynamic lookup."""
     name = " ".join(raw.strip().split())
     key = name.lower()
-    if key in _APP_ALIASES:
-        return _APP_ALIASES[key]
-    for alias, full in sorted(_APP_ALIASES.items(), key=lambda item: -len(item[0])):
-        if alias in key:
+    if key in _APP_NICKNAMES:
+        mapped = _APP_NICKNAMES[key]
+        if mapped == "__jarvis_browser__":
+            return "browser"
+        return mapped
+    for alias, full in sorted(_APP_NICKNAMES.items(), key=lambda item: -len(item[0])):
+        if len(alias) >= 3 and alias in key:
+            if full == "__jarvis_browser__":
+                return "browser"
             return full
     return name
 
@@ -145,6 +130,50 @@ def _launch_vscode_cli() -> tuple[bool, str] | None:
     return None
 
 
+def _is_browser_query(query: str) -> bool:
+    from helpers.jarvis_web import is_generic_browser_request
+
+    key = query.strip().lower()
+    if is_generic_browser_request(query):
+        return True
+    return _APP_NICKNAMES.get(key) == "__jarvis_browser__"
+
+
+def _launch_default_browser() -> tuple[bool, str]:
+    import sys
+
+    url = "https://www.google.com"
+    if sys.platform == "win32":
+        try:
+            os.startfile(url)  # noqa: S606
+            time.sleep(0.35)
+            focus_browser_window()
+            return True, "Browser"
+        except OSError:
+            pass
+        for exe in ("msedge", "chrome", "firefox", "brave"):
+            try:
+                subprocess.Popen(  # noqa: S603
+                    ["cmd", "/c", "start", "", exe],
+                    shell=False,
+                    cwd=os.path.expanduser("~"),
+                )
+                time.sleep(0.4)
+                focus_browser_window()
+                return True, "Browser"
+            except OSError:
+                continue
+    else:
+        try:
+            import webbrowser
+
+            webbrowser.open(url)
+            return True, "Browser"
+        except OSError:
+            pass
+    return False, "Browser"
+
+
 def _is_vscode_query(query: str) -> bool:
     low = query.lower()
     return any(
@@ -159,16 +188,27 @@ def _is_vscode_query(query: str) -> bool:
 
 
 def launch_windows_app(raw: str) -> tuple[bool, str]:
-    """Launch an installed Windows app. Returns (success, display_label)."""
+    """Launch app, shell folder, or Start Menu item. Returns (success, display_label)."""
     display = canonical_app_name(raw)
     query = normalize_app_query(raw)
     if not query:
         return False, ""
 
+    if _is_browser_query(raw) or _is_browser_query(query) or _is_browser_query(display):
+        ok, label = _launch_default_browser()
+        if ok:
+            return True, label
+
     if _is_vscode_query(query) or _is_vscode_query(display):
         cli = _launch_vscode_cli()
         if cli:
             return cli
+
+    shell_ok, shell_label = try_open_shell_target(raw)
+    if not shell_ok and query != raw.lower():
+        shell_ok, shell_label = try_open_shell_target(query)
+    if shell_ok:
+        return True, shell_label
 
     env = {**os.environ, "JARVIS_APP_QUERY": query}
     try:
@@ -189,9 +229,9 @@ def launch_windows_app(raw: str) -> tuple[bool, str]:
             cwd=os.path.expanduser("~"),
         )
     except (subprocess.TimeoutExpired, OSError):
-        return False, query.title()
+        return False, display or query.title()
 
-    label = query.title()
+    label = display or query.title()
     if proc.stdout:
         lines = [ln.strip() for ln in proc.stdout.strip().splitlines() if ln.strip()]
         if lines:

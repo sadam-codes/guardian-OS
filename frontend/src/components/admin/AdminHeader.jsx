@@ -1,11 +1,11 @@
 function BrandBlock({ title, subtitle }) {
   return (
     <div className="flex min-w-0 items-center gap-3">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 shadow-md shadow-indigo-600/25">
-        <ShieldIcon className="h-5 w-5 text-white" />
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10">
+        <ShieldIcon className="h-5 w-5 text-cyan-400" />
       </div>
       <div className="min-w-0">
-        <h1 className="truncate text-lg font-semibold text-slate-900 sm:text-xl">{title}</h1>
+        <h1 className="truncate text-lg font-semibold text-slate-100 sm:text-xl">{title}</h1>
         <p className="truncate text-sm text-slate-500">{subtitle}</p>
       </div>
     </div>
@@ -16,13 +16,13 @@ function UserActions({ session, onLogout }) {
   if (!session) return null
   return (
     <div className="flex shrink-0 items-center gap-3">
-      <span className="text-sm font-medium text-slate-700">{session.name}</span>
+      <span className="text-sm font-medium text-slate-300">{session.name}</span>
       <button
         type="button"
         onClick={onLogout}
         aria-label="Log out"
         title="Log out"
-        className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+        className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-white/5 text-slate-400 transition hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
       >
         <LogoutIcon className="h-5 w-5" />
       </button>
@@ -32,14 +32,14 @@ function UserActions({ session, onLogout }) {
 
 export default function AdminHeader({ session, onLogout }) {
   return (
-    <header className="shrink-0 border-b border-slate-200/80 bg-white/80 backdrop-blur-md">
+    <header className="shrink-0 border-b border-white/10 bg-[#0b1018]">
       <div className="flex w-full">
         <div className="flex w-full items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:hidden">
           <BrandBlock title="Guardian OS" subtitle="Control center" />
           <UserActions session={session} onLogout={onLogout} />
         </div>
 
-        <div className="hidden lg:flex lg:w-64 lg:shrink-0 lg:items-center lg:border-r lg:border-slate-200/80 lg:px-4 lg:py-4">
+        <div className="hidden lg:flex lg:w-64 lg:shrink-0 lg:items-center lg:border-r lg:border-white/10 lg:px-4 lg:py-4">
           <BrandBlock title="Guardian OS" subtitle="Control center" />
         </div>
 

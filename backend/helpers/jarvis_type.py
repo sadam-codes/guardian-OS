@@ -1,4 +1,4 @@
-"""Type text into the focused app (WhatsApp, etc.) — not file editors."""
+"""Type text into the focused app (WhatsApp, Instagram, etc.) — not file editors."""
 
 from __future__ import annotations
 
@@ -7,7 +7,15 @@ import subprocess
 import time
 
 from helpers.jarvis_focus import focus_app_by_name
-from helpers.jarvis_messaging import is_messaging_app, parse_message_slots
+from helpers.jarvis_messaging import (
+    is_instagram_app,
+    is_messaging_app,
+    looks_like_call_request,
+    looks_like_voice_message,
+    parse_message_slots,
+    resolve_recipient_pronoun,
+)
+from helpers.jarvis_instagram import instagram_send_message
 from schemas.jarvis import JarvisActionResult, JarvisIntent, JarvisSessionContext
 
 ALLOW_OS_CONTROL = os.getenv("JARVIS_ALLOW_OS", "true").lower() in ("1", "true", "yes")
@@ -96,6 +104,18 @@ def action_type_text(
         )
 
     raw = (intent.slots.get("content") or intent.slots.get("text") or "").strip()
+    user_blob = (intent.slots.get("user_text") or raw or "").strip()
+
+    if looks_like_voice_message(user_blob):
+        from helpers.jarvis_voice_message import action_send_voice_message
+
+        return action_send_voice_message(intent, ctx)
+
+    if looks_like_call_request(user_blob):
+        from helpers.jarvis_calls import action_start_call
+
+        return action_start_call(intent, ctx)
+
     recipient = (intent.slots.get("recipient") or "").strip()
     app = (
         intent.slots.get("app")
@@ -116,9 +136,34 @@ def action_type_text(
         if parsed_send:
             should_send = True
 
+    recipient = resolve_recipient_pronoun(recipient, ctx)
     message = raw.strip()
     if not message and not recipient:
         return JarvisActionResult(False, "What message should I type?", "type_text")
+
+    if is_instagram_app(app):
+        if message and (not recipient or " to " in message.lower()):
+            parsed_recipient, parsed_body, parsed_send = parse_message_slots(message)
+            if parsed_recipient:
+                recipient = parsed_recipient
+                message = parsed_body
+            if parsed_send:
+                should_send = True
+        ok, err = instagram_send_message(recipient, message, send=should_send)
+        label = "Instagram"
+        if not ok:
+            return JarvisActionResult(False, err or "Could not send on Instagram.", "type_text")
+        if recipient and message:
+            msg = (
+                f"Sent your message to {recipient} on {label}."
+                if should_send
+                else f"Opened {label}, found {recipient}, and typed your message."
+            )
+        elif recipient:
+            msg = f"Opened {label} and searched for {recipient}."
+        else:
+            msg = f"Typed your message in {label}."
+        return JarvisActionResult(True, msg, "type_text", target_label=label)
 
     if is_messaging_app(app):
         focus_app_by_name(app)

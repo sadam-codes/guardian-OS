@@ -73,6 +73,7 @@ _APP_FOCUS_HINTS: dict[str, list[str]] = {
     "spotify": ["Spotify"],
     "discord": ["Discord"],
     "whatsapp": ["WhatsApp"],
+    "instagram": ["Instagram", "Chromium", "Google Chrome", "Microsoft Edge"],
     "zoom": ["Zoom"],
     "microsoft teams": ["Microsoft Teams", "Teams"],
     "windows terminal": ["Windows Terminal"],

@@ -234,33 +234,54 @@ def _norm_path_str(raw: str) -> str:
 
 
 def launch_shell(shell: str) -> tuple[bool, str]:
-    """Start Windows Terminal, PowerShell, or CMD. Returns (ok, label)."""
+    """Open a visible terminal window (not hidden background PowerShell)."""
+    import subprocess
+    import time
+
     from helpers.jarvis_focus import focus_app_by_name
+    from helpers.jarvis_system import system_root
 
     shell = (shell or "wt").lower()
+    cwd = system_root()
+
+    # (executable name for `where`, start args after `start ""`, focus label)
     if shell == "cmd":
-        order = ["cmd"]
+        candidates = [
+            ("cmd.exe", ["cmd.exe", "/k"], "Command Prompt"),
+        ]
     elif shell == "powershell":
-        order = ["pwsh", "powershell"]
+        candidates = [
+            ("pwsh.exe", ["pwsh.exe", "-NoExit"], "PowerShell"),
+            ("powershell.exe", ["powershell.exe", "-NoExit"], "Windows PowerShell"),
+        ]
     else:
-        order = ["wt", "wt.exe", "pwsh", "powershell", "cmd"]
+        candidates = [
+            ("wt.exe", ["wt.exe"], "Windows Terminal"),
+            ("wt", ["wt.exe"], "Windows Terminal"),
+            ("pwsh.exe", ["pwsh.exe", "-NoExit"], "PowerShell"),
+            ("powershell.exe", ["powershell.exe", "-NoExit"], "Windows PowerShell"),
+            ("cmd.exe", ["cmd.exe", "/k"], "Command Prompt"),
+        ]
 
-    for name in order:
-        exe = shutil.which(name)
-        if exe:
-            import subprocess
-
-            subprocess.Popen([exe])
-            label = Path(exe).name
-            focus_name = {
-                "wt": "Windows Terminal",
-                "wt.exe": "Windows Terminal",
-                "pwsh": "PowerShell",
-                "powershell": "Windows PowerShell",
-                "cmd": "Command Prompt",
-            }.get(name.lower(), label)
-            focus_app_by_name(focus_name)
-            return True, label
+    for _which_name, start_argv, focus_label in candidates:
+        exe = shutil.which(_which_name.replace(".exe", "")) or shutil.which(_which_name)
+        if not exe:
+            continue
+        argv = [start_argv[0]] if start_argv[0].endswith(".exe") else start_argv
+        if start_argv[0] != exe:
+            argv[0] = exe
+        try:
+            # `start` forces a new visible console window on Windows
+            subprocess.Popen(
+                ["cmd", "/c", "start", ""] + argv,
+                cwd=cwd,
+                shell=False,
+            )
+            time.sleep(0.6)
+            focus_app_by_name(focus_label)
+            return True, focus_label
+        except OSError:
+            continue
 
     return False, shell
 

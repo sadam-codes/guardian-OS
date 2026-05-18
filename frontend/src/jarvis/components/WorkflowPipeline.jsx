@@ -27,7 +27,7 @@ export default function WorkflowPipeline({ stages = [], pipeline = [] }) {
         {ordered.slice(0, 6).map((stage) => (
           <span
             key={stage}
-            className="h-1 w-1 rounded-full bg-cyan-500/25"
+            className="h-1.5 w-1.5 rounded-full bg-slate-600/80"
             title={STAGE_LABELS[stage]}
           />
         ))}

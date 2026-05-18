@@ -7,3 +7,4 @@ __pycache__/
 face_models/
 *.onnx
 data/guardian_memory.json
+.jarvis-browser-profile/

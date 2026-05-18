@@ -3,12 +3,18 @@ from sqlalchemy.orm import Session
 
 from config.database import get_db
 from helpers.activity_log import STATUS_FAILURE, STATUS_INFO, STATUS_SUCCESS, record_activity
-from helpers.jarvis import ASSISTANT_NAME, jarvis_example_commands, process_jarvis_command
+from helpers.jarvis import (
+    ASSISTANT_NAME,
+    jarvis_example_commands,
+    plan_jarvis_command,
+    process_jarvis_command,
+)
 from helpers.jarvis_transcribe import transcribe_audio_bytes, transcribe_enabled
 from schemas.jarvis import (
     JarvisCapabilitiesResponse,
     JarvisCommandRequest,
     JarvisCommandResponse,
+    JarvisPlanResponse,
     JarvisTranscribeResponse,
 )
 
@@ -38,7 +44,11 @@ def get_capabilities() -> JarvisCapabilitiesResponse:
                 "create_folder",
                 "write_text",
                 "type_text",
+                "send_voice_message",
+                "start_call",
                 "run_project",
+                "run_powershell",
+                "empty_recycle_bin",
                 "compound",
                 "open_terminal_here",
                 "clear_context",
@@ -48,12 +58,21 @@ def get_capabilities() -> JarvisCapabilitiesResponse:
     )
 
 
+@router.post("/plan", response_model=JarvisPlanResponse)
+def plan_command(body: JarvisCommandRequest) -> JarvisPlanResponse:
+    """Understand command quickly — client speaks jarvis_brief before slow execution."""
+    return plan_jarvis_command(body.text, context=body.context)
+
+
 @router.post("/command", response_model=JarvisCommandResponse)
 def run_command(body: JarvisCommandRequest, db: Session = Depends(get_db)) -> JarvisCommandResponse:
     response = process_jarvis_command(
         body.text,
         user_name=body.user_name,
         context=body.context,
+        planned_steps=body.planned_steps,
+        understood=body.understood,
+        jarvis_brief=body.jarvis_brief,
     )
     actor = (body.user_name or "user").strip() or "user"
     record_activity(

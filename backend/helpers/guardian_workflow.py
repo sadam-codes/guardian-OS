@@ -149,6 +149,9 @@ def execute_guardian_workflow(body: GuardianWorkflowRequest) -> GuardianWorkflow
         command_text,
         user_name=body.user_name,
         context=body.context,
+        planned_steps=body.planned_steps,
+        understood=body.understood,
+        jarvis_brief=body.jarvis_brief,
     )
 
     record_command(body.user_id, body.user_name, command_text, jarvis_result.intent)

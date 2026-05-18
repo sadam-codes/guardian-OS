@@ -1,35 +1,12 @@
+import AppSidebar from '../layout/AppSidebar'
+
 const NAV = [
   { id: 'home', label: 'Home', href: '/user', icon: HomeIcon },
-  { id: 'jarvis', label: 'Assistant', href: '/jarvis', icon: JarvisIcon },
+  { id: 'jarvis', label: 'Voice assistant', href: '/jarvis', icon: JarvisIcon },
 ]
 
 export default function UserSidebar({ active }) {
-  return (
-    <aside className="shrink-0 border-b border-white/10 bg-[#0d131c] lg:w-52 lg:border-b-0 lg:border-r">
-      <nav className="flex gap-1 p-2 lg:flex-col lg:p-3">
-        {NAV.map(({ id, label, icon: Icon, href }) => {
-          const isActive = active === id
-          return (
-            <a
-              key={id}
-              href={href}
-              className={`flex flex-1 cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium transition lg:flex-none ${
-                isActive
-                  ? 'border border-cyan-500/25 bg-cyan-500/10 text-cyan-300'
-                  : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-              }`}
-            >
-              <Icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-cyan-400' : 'text-slate-500'}`} />
-              {label}
-              {isActive && (
-                <span className="ml-auto hidden h-1.5 w-1.5 rounded-full bg-cyan-400 lg:block" />
-              )}
-            </a>
-          )
-        })}
-      </nav>
-    </aside>
-  )
+  return <AppSidebar items={NAV} active={active} />
 }
 
 function HomeIcon({ className }) {

@@ -29,6 +29,9 @@ from helpers.jarvis_nested import (
     action_write_text,
 )
 from helpers.jarvis_type import action_type_text
+from helpers.jarvis_calls import action_start_call
+from helpers.jarvis_voice_message import action_send_voice_message
+from helpers.jarvis_powershell import run_voice_command
 from helpers.jarvis_windows import canonical_app_name, launch_windows_app
 from schemas.jarvis import JarvisActionResult, JarvisIntent, JarvisSessionContext
 
@@ -86,8 +89,12 @@ def _action_help(_: JarvisIntent) -> JarvisActionResult:
         "Websites and Google search use Playwright (install: pip install playwright && playwright install chromium). "
         "YouTube songs: Playwright opens results and clicks the first video to play. "
         "Volume, desktop, and screenshots use PyAutoGUI when available. "
-        "Nested commands: open VS Code then write hello world; open WhatsApp then type a message to a contact. "
-        "Say clear context to reset. Deep in-app UI control is still limited.",
+        "WhatsApp: text messages, voice messages, audio call, and video call. "
+        "Nested: open VS Code then write hello world; open WhatsApp then message or call a contact. "
+        "Groq understands your words. PowerShell runs from C Windows System32 with access to the whole PC "
+        "(drives, services, registry, processes). Run backend as Administrator for full admin rights. "
+        "I remember recent prompts in this session (paths, drives, apps). "
+        "Say clear context to reset memory. Deep in-app UI control is still limited.",
         "help",
     )
 
@@ -143,44 +150,9 @@ def _action_create_folder(intent: JarvisIntent) -> JarvisActionResult:
     blocked = _require_os()
     if blocked:
         return blocked
+    from helpers.jarvis_folder import run_create_folder
 
-    name = (
-        intent.slots.get("name")
-        or intent.slots.get("folder_name")
-        or intent.slots.get("folder")
-        or ""
-    ).strip().strip('"').strip("'")
-    parent_raw = (intent.slots.get("parent") or intent.slots.get("path") or "").strip()
-
-    if parent_raw and not name:
-        full = _resolve_local_path(parent_raw) or parent_raw
-        folder = Path(full)
-    elif parent_raw and name:
-        parent = _resolve_local_path(parent_raw) or parent_raw
-        folder = Path(parent) / name
-    else:
-        return JarvisActionResult(
-            False,
-            "Tell me where to create the folder and what to name it.",
-            "create_folder",
-        )
-
-    try:
-        folder = folder.resolve()
-        folder.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        return JarvisActionResult(
-            False,
-            f"Could not create folder: {exc}",
-            "create_folder",
-        )
-
-    return JarvisActionResult(
-        True,
-        f"Created folder {folder.name} at {folder.parent}.",
-        "create_folder",
-        target_label=str(folder),
-    )
+    return run_create_folder(intent)
 
 
 def _action_open_path(intent: JarvisIntent) -> JarvisActionResult:
@@ -220,7 +192,12 @@ def _action_open_terminal(intent: JarvisIntent) -> JarvisActionResult:
             "Could not start a terminal. Install Windows Terminal or ensure PowerShell is on PATH.",
             "open_terminal",
         )
-    return JarvisActionResult(True, f"Opening {label}.", "open_terminal", target_label=label)
+    return JarvisActionResult(
+        True,
+        f"Opened {label} in a new window. You can type commands there.",
+        "open_terminal",
+        target_label=label,
+    )
 
 
 def _action_open_app(intent: JarvisIntent) -> JarvisActionResult:
@@ -308,9 +285,13 @@ def _action_open_app(intent: JarvisIntent) -> JarvisActionResult:
             if note:
                 m = f"{m} {note}"
             return JarvisActionResult(True, m, "web_search", target_label=raw)
+        user_text = (intent.slots.get("user_text") or intent.slots.get("command") or raw).strip()
+        ps_ok, ps_msg, _ = run_voice_command(user_text)
+        if ps_ok:
+            return JarvisActionResult(True, ps_msg, "run_powershell", target_label=user_text[:80])
         return JarvisActionResult(
             False,
-            f"I could not find an app named {raw}. Say the exact Start menu name or a full path.",
+            ps_msg if ps_msg and "GROQ" in ps_msg else f"I could not open {raw}. {ps_msg or ''}".strip(),
             "open_app",
             target_label=raw,
         )
@@ -472,6 +453,53 @@ def _action_shutdown(_: JarvisIntent) -> JarvisActionResult:
     return JarvisActionResult(True, "Shutting down in 15 seconds.", "shutdown")
 
 
+def _action_empty_recycle_bin(intent: JarvisIntent) -> JarvisActionResult:
+    blocked = _require_os()
+    if blocked:
+        return blocked
+    from helpers.jarvis_recycle import empty_recycle_bin
+
+    open_after = (intent.slots.get("open_after") or "").lower() in ("1", "true", "yes")
+    ok, msg = empty_recycle_bin(open_folder_after=open_after)
+    return JarvisActionResult(ok, msg, "empty_recycle_bin", target_label="Recycle Bin")
+
+
+def _action_run_powershell(intent: JarvisIntent) -> JarvisActionResult:
+    blocked = _require_os()
+    if blocked:
+        return blocked
+    speech = (
+        intent.slots.get("command")
+        or intent.slots.get("query")
+        or intent.slots.get("user_text")
+        or intent.slots.get("text")
+        or ""
+    ).strip()
+    from helpers.jarvis_recycle import user_wants_empty_recycle_bin
+    from helpers.jarvis_terminal_detect import user_wants_visible_terminal
+
+    if user_wants_empty_recycle_bin(speech):
+        return _action_empty_recycle_bin(intent)
+
+    if user_wants_visible_terminal(speech):
+        shell = "powershell" if "powershell" in speech.lower() or "pwsh" in speech.lower() else "wt"
+        if "cmd" in speech.lower() and "powershell" not in speech.lower():
+            shell = "cmd"
+        return _action_open_terminal(
+            JarvisIntent(intent="open_terminal", confidence=0.95, slots={"shell": shell, **intent.slots})
+        )
+    script_hint = (intent.slots.get("script") or "").strip()
+    if not speech and not script_hint:
+        return JarvisActionResult(
+            False,
+            "Say what you want done — I will run it with PowerShell.",
+            "run_powershell",
+        )
+    ok, msg, executed = run_voice_command(speech or script_hint, script_hint=script_hint or None)
+    label = (executed or speech or "PowerShell")[:80]
+    return JarvisActionResult(ok, msg, "run_powershell", target_label=label)
+
+
 def _action_restart(_: JarvisIntent) -> JarvisActionResult:
     blocked = _require_os()
     if blocked:
@@ -504,6 +532,8 @@ _HANDLERS: dict[str, Callable[[JarvisIntent], JarvisActionResult]] = {
     "screenshot": _action_screenshot,
     "shutdown": _action_shutdown,
     "restart": _action_restart,
+    "run_powershell": _action_run_powershell,
+    "empty_recycle_bin": _action_empty_recycle_bin,
     "unknown": _action_unknown,
     "open_terminal_here": action_open_terminal_here,
     "clear_context": action_clear_context,
@@ -517,6 +547,10 @@ def execute_jarvis_intent(
 ) -> JarvisActionResult:
     if intent.intent == "run_project":
         return action_run_project(intent, context)
+    if intent.intent == "start_call":
+        return action_start_call(intent, context)
+    if intent.intent == "send_voice_message":
+        return action_send_voice_message(intent, context)
     if intent.intent == "type_text":
         return action_type_text(intent, context)
     if intent.intent == "write_text":

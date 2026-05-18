@@ -4,6 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  optimizeDeps: {
+    include: ['@vapi-ai/web', '@daily-co/daily-js'],
+  },
   server: {
     port: 5173,
     proxy: {

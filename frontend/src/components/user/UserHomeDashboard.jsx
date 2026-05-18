@@ -4,7 +4,7 @@ import { fetchJarvisCapabilities } from '../../jarvis/api/jarvis'
 
 const CAPABILITIES = [
   { title: 'Voice commands', desc: 'Speak naturally — open apps, search, control volume' },
-  { title: 'WhatsApp & chat', desc: 'Send messages by voice to your contacts' },
+  { title: 'WhatsApp & Instagram', desc: 'Send messages by voice to your contacts' },
   { title: 'Desktop control', desc: 'Launch apps, folders, terminal, and more' },
   { title: 'Secured', desc: 'Face-verified session with safety checks' },
 ]
@@ -112,7 +112,7 @@ export default function UserHomeDashboard({ session }) {
               <div className="min-w-0 flex-1">
                 <h2 className="text-xl font-semibold text-slate-100">Talk to {assistantName}</h2>
                 <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                  Open the voice assistant to control your computer — open apps, send WhatsApp messages,
+                  Open the voice assistant to control your computer — send WhatsApp or Instagram messages,
                   search the web, and run multi-step commands hands-free.
                 </p>
                 <a

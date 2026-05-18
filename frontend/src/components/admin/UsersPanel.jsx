@@ -1,13 +1,15 @@
 import UserManagement from '../UserManagement'
+import AdminSectionHeader from './AdminSectionHeader'
 
 export default function UsersPanel({ users, actorName, currentUserId, onRefresh, onSessionUpdate }) {
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-xl font-bold text-slate-900">Registered users</h2>
-        <p className="mt-1 text-sm text-slate-500">View and remove enrolled accounts.</p>
-      </div>
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="space-y-6">
+      <AdminSectionHeader
+        title="Registered users"
+        subtitle="View and manage enrolled accounts."
+      />
+
+      <div className="rounded-2xl border border-white/[0.08] bg-[#121820] p-6 sm:p-8">
         <UserManagement
           users={users}
           actorRole="admin"
@@ -15,6 +17,7 @@ export default function UsersPanel({ users, actorName, currentUserId, onRefresh,
           currentUserId={currentUserId}
           onRefresh={onRefresh}
           onSessionUpdate={onSessionUpdate}
+          variant="dark"
         />
       </div>
     </div>

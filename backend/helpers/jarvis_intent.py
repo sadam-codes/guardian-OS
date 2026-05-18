@@ -45,6 +45,12 @@ _INTENT_SLOT_ALIASES: dict[str, dict[str, str]] = {
         "send": "send",
     },
     "run_project": {"path": "path", "folder": "folder"},
+    "run_powershell": {
+        "command": "command",
+        "query": "command",
+        "script": "script",
+        "text": "command",
+    },
     "create_folder": {
         "parent": "parent",
         "path": "parent",
@@ -81,9 +87,7 @@ def normalize_jarvis_slots(intent: str, slots: dict[str, str]) -> dict[str, str]
         if canon and not (out.get(canon) or "").strip():
             out[canon] = _trim_open_app_query(text) if canon == "app" else text
     if intent == "open_app" and (out.get("app") or "").strip():
-        from helpers.jarvis_windows import canonical_app_name
-
-        out["app"] = canonical_app_name(_trim_open_app_query(out["app"]))
+        out["app"] = _trim_open_app_query(out["app"])
     return out
 
 
@@ -165,10 +169,34 @@ _rule(r"restart\s+(?:my\s+)?(?:the\s+)?(?:pc|computer|laptop|system)|reboot", "r
 _rule(r"cancel|stop listening|never mind", "cancel", 0.9)
 _rule(r"help|what can you do|capabilities", "help", 0.95)
 _rule(
-    r"(?:please\s+)?(?:write|type|create)\s+(?P<content>.+?)(?:\s+in\s+it)?\.?\s*$",
+    r"(?:please\s+)?(?:write|type)\s+(?P<content>.+?)(?:\s+in\s+it)?\.?\s*$",
     "write_text",
     0.88,
     content="content",
+)
+_rule(
+    r"(?:please\s+)?create\s+(?!(?:a\s+)?folder\b)(?P<content>.+?)(?:\s+in\s+it)?\.?\s*$",
+    "write_text",
+    0.86,
+    content="content",
+)
+_rule(
+    r"(?:please\s+)?create\s+(?:a\s+)?folder\s+"
+    r"(?:named|called|name(?:d)?\s+as\s+)?['\"]?(?P<name>[^'\"]+?)['\"]?"
+    r"(?:\s+(?:on|in|inside|under)\s+(?P<parent>.+))?\s*$",
+    "create_folder",
+    0.96,
+    name="name",
+    parent="parent",
+)
+_rule(
+    r"(?:please\s+)?create\s+(?:a\s+)?folder\s+"
+    r"(?:on|in|inside|under)\s+(?P<parent>.+?)\s+"
+    r"(?:named|called|name(?:d)?\s+as\s+)?['\"]?(?P<name>[^'\"]+?)['\"]?\s*$",
+    "create_folder",
+    0.96,
+    name="name",
+    parent="parent",
 )
 _rule(
     r"(?:please\s+)?run\s+(?:the\s+)?backend(?:\s+folder)?\.?\s*$",
@@ -181,6 +209,30 @@ _rule(
     "run_project",
     0.86,
     folder="folder",
+)
+_rule(
+    r"(?:please\s+)?(?:run|execute)\s+(?:this\s+)?(?:powershell|ps)\s*(?:command\s+)?(?:\:|;)?\s*(?P<script>.+)$",
+    "run_powershell",
+    0.95,
+    script="script",
+)
+_rule(
+    r"(?:please\s+)?(?:in\s+)?powershell\s*(?:\:|;)?\s*(?P<script>.+)$",
+    "run_powershell",
+    0.94,
+    script="script",
+)
+_rule(
+    r"(?P<command>.+)\s+in\s+powershell\s*$",
+    "run_powershell",
+    0.9,
+    command="command",
+)
+_rule(
+    r"(?:please\s+)?(?:run|execute)\s+command\s+(?P<command>.+)$",
+    "run_powershell",
+    0.88,
+    command="command",
 )
 
 

@@ -78,6 +78,17 @@ def action_write_text(
     if not content:
         return JarvisActionResult(False, "What should I write?", "write_text")
 
+    from helpers.jarvis_folder import (
+        content_looks_like_folder_not_file,
+        parse_create_folder_intent,
+        run_create_folder,
+    )
+
+    if content_looks_like_folder_not_file(content):
+        folder_intent = parse_create_folder_intent(content)
+        if folder_intent:
+            return run_create_folder(folder_intent)
+
     app_hint = intent.slots.get("app") or (ctx.last_app if ctx else None)
     if should_type_not_write(app=app_hint, content=content):
         slots = dict(intent.slots)

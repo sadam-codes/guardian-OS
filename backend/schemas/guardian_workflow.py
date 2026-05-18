@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from schemas.jarvis import JarvisCommandResponse, JarvisSessionContext
+from schemas.jarvis import JarvisCommandResponse, JarvisIntent, JarvisSessionContext
 
 
 class WorkflowStageLog(BaseModel):
@@ -18,6 +18,9 @@ class GuardianWorkflowRequest(BaseModel):
     gesture: str | None = Field(default=None, max_length=32)
     context: JarvisSessionContext | None = None
     skip_safety: bool = False
+    planned_steps: list[JarvisIntent] | None = None
+    understood: str | None = None
+    jarvis_brief: str | None = None
 
 
 class GuardianWorkflowResponse(BaseModel):

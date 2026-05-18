@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
-import AdminHeader from '../../components/admin/AdminHeader'
-import AdminSidebar from '../../components/admin/AdminSidebar'
+import AdminShell from '../../components/admin/AdminShell'
 import UserAppShell from '../../components/user/UserAppShell'
 import { useToast } from '../../components/ToastProvider'
 import GuardianWorkflowDashboard from '../components/GuardianWorkflowDashboard'
@@ -27,15 +26,9 @@ export default function JarvisPage() {
 
   if (isAdmin) {
     return (
-      <div className="flex min-h-screen flex-col bg-[#0b1018] text-slate-200">
-        <AdminHeader session={session} onLogout={handleLogout} />
-        <div className="flex flex-1 flex-col lg:flex-row">
-          <AdminSidebar active="jarvis" linkNav onChange={() => {}} />
-          <main className="flex-1 overflow-auto p-4 sm:p-5">
-            <GuardianWorkflowDashboard session={session} />
-          </main>
-        </div>
-      </div>
+      <AdminShell session={session} active="jarvis" onLogout={handleLogout}>
+        <GuardianWorkflowDashboard session={session} />
+      </AdminShell>
     )
   }
 

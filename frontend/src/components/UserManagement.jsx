@@ -12,11 +12,13 @@ export default function UserManagement({
   currentUserId,
   onRefresh,
   onSessionUpdate,
+  variant = 'light',
 }) {
   const toast = useToast()
   const [deleting, setDeleting] = useState(null)
   const [busy, setBusy] = useState(false)
   const [roleBusy, setRoleBusy] = useState(null)
+  const dark = variant === 'dark'
 
   async function handleRoleChange(user, newRole) {
     if (newRole === user.role) return
@@ -36,7 +38,7 @@ export default function UserManagement({
   }
 
   if (users.length === 0) {
-    return <p className="text-sm text-slate-500">No users registered yet.</p>
+    return <p className={`text-sm ${dark ? 'text-slate-500' : 'text-slate-500'}`}>No users registered yet.</p>
   }
 
   return (
@@ -44,20 +46,28 @@ export default function UserManagement({
       <div className="overflow-x-auto">
         <table className="w-full min-w-[320px] text-left text-sm">
           <thead>
-            <tr className="border-b border-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <tr
+              className={`border-b text-xs font-semibold uppercase tracking-wide ${
+                dark
+                  ? 'border-white/10 text-slate-500'
+                  : 'border-slate-100 text-slate-500'
+              }`}
+            >
               <th className="pb-2 pr-2">User</th>
               <th className="pb-2 pr-2">Role</th>
               <th className="pb-2 text-right">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className={dark ? 'divide-y divide-white/[0.06]' : 'divide-y divide-slate-100'}>
             {users.map((u) => (
               <tr key={u.id}>
                 <td className="py-2.5 pr-2">
-                  <span className="font-medium text-slate-800">{u.name}</span>
-                  <span className="ml-1 text-xs text-slate-400">#{u.id}</span>
+                  <span className={`font-medium ${dark ? 'text-slate-100' : 'text-slate-800'}`}>
+                    {u.name}
+                  </span>
+                  <span className="ml-1 text-xs text-slate-500">#{u.id}</span>
                   {currentUserId === u.id && (
-                    <span className="ml-1 text-xs text-slate-400">(you)</span>
+                    <span className="ml-1 text-xs text-slate-500">(you)</span>
                   )}
                 </td>
                 <td className="py-2.5 pr-2">
@@ -66,7 +76,11 @@ export default function UserManagement({
                     disabled={roleBusy === u.id}
                     onChange={(e) => handleRoleChange(u, e.target.value)}
                     aria-label={`Role for ${u.name}`}
-                    className="cursor-pointer rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:cursor-wait disabled:opacity-60"
+                    className={`cursor-pointer rounded-lg border px-2.5 py-1.5 text-sm font-medium outline-none disabled:cursor-wait disabled:opacity-60 ${
+                      dark
+                        ? 'border-white/10 bg-[#0a0e14] text-slate-200 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/25'
+                        : 'border-slate-200 bg-white text-slate-700 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20'
+                    }`}
                   >
                     <option value={ROLE_USER}>User</option>
                     <option value={ROLE_ADMIN}>Admin</option>
@@ -77,9 +91,13 @@ export default function UserManagement({
                     type="button"
                     onClick={() => setDeleting(u)}
                     disabled={currentUserId === u.id}
-                    aria-label={currentUserId === u.id ? 'Cannot delete your own account' : `Delete ${u.name}`}
+                    aria-label={
+                      currentUserId === u.id ? 'Cannot delete your own account' : `Delete ${u.name}`
+                    }
                     title={currentUserId === u.id ? 'Cannot delete your own account' : 'Delete user'}
-                    className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    className={`inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-red-500 transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                      dark ? 'hover:bg-red-500/10' : 'hover:bg-red-50'
+                    }`}
                   >
                     <TrashIcon className="h-5 w-5" />
                   </button>
@@ -92,6 +110,7 @@ export default function UserManagement({
 
       {deleting && (
         <ConfirmModal
+          dark={dark}
           title="Delete user"
           message={`Remove "${deleting.name}"? This cannot be undone.`}
           confirmLabel="Delete"
@@ -117,11 +136,12 @@ export default function UserManagement({
   )
 }
 
-function ConfirmModal({ title, message, confirmLabel, danger, busy, onClose, onConfirm }) {
+function ConfirmModal({ title, message, confirmLabel, danger, busy, onClose, onConfirm, dark }) {
   return (
-    <Modal title={title} onClose={onClose}>
-      <p className="text-sm text-slate-600">{message}</p>
+    <Modal title={title} onClose={onClose} dark={dark}>
+      <p className={`text-sm ${dark ? 'text-slate-400' : 'text-slate-600'}`}>{message}</p>
       <ModalActions
+        dark={dark}
         busy={busy}
         onCancel={onClose}
         onConfirm={onConfirm}
@@ -132,31 +152,41 @@ function ConfirmModal({ title, message, confirmLabel, danger, busy, onClose, onC
   )
 }
 
-function Modal({ title, children, onClose }) {
+function Modal({ title, children, onClose, dark }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
-        className="absolute inset-0 cursor-pointer bg-slate-900/40 backdrop-blur-sm"
+        className="absolute inset-0 cursor-pointer bg-black/60 backdrop-blur-sm"
         aria-label="Close"
         onClick={onClose}
       />
-      <div className="relative z-10 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
-        <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+      <div
+        className={`relative z-10 w-full max-w-md rounded-2xl border p-6 shadow-xl ${
+          dark ? 'border-white/10 bg-[#121820]' : 'border-slate-200 bg-white'
+        }`}
+      >
+        <h3 className={`text-lg font-semibold ${dark ? 'text-white' : 'text-slate-900'}`}>
+          {title}
+        </h3>
         <div className="mt-4">{children}</div>
       </div>
     </div>
   )
 }
 
-function ModalActions({ busy, onCancel, onConfirm, confirmLabel, danger }) {
+function ModalActions({ busy, onCancel, onConfirm, confirmLabel, danger, dark }) {
   return (
     <div className="mt-6 flex justify-end gap-2">
       <button
         type="button"
         onClick={onCancel}
         disabled={busy}
-        className="cursor-pointer rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        className={`cursor-pointer rounded-xl border px-4 py-2 text-sm font-medium disabled:opacity-50 ${
+          dark
+            ? 'border-white/10 text-slate-300 hover:bg-white/5'
+            : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+        }`}
       >
         Cancel
       </button>
@@ -165,7 +195,11 @@ function ModalActions({ busy, onCancel, onConfirm, confirmLabel, danger }) {
         onClick={onConfirm}
         disabled={busy}
         className={`cursor-pointer rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 ${
-          danger ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'
+          danger
+            ? 'bg-red-600 hover:bg-red-700'
+            : dark
+              ? 'bg-cyan-600 hover:bg-cyan-500'
+              : 'bg-indigo-600 hover:bg-indigo-700'
         }`}
       >
         {busy ? 'Please wait…' : confirmLabel}

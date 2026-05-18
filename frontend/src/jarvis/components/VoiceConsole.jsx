@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { fetchJarvisCapabilities, sendJarvisCommand } from '../api/jarvis'
+import { fetchJarvisCapabilities, planJarvisCommand, sendJarvisCommand } from '../api/jarvis'
 import { fetchFrequentCommands } from '../api/guardianWorkflow'
+import { isVapiConfigured } from '../config/vapi'
+import { useVapiCall } from '../context/VapiCallContext'
 import { useVoiceInput } from '../hooks/useVoiceInput'
+import { speakBrowser } from '../utils/speak'
 import { useToast } from '../../components/ToastProvider'
 
 function pickFemaleEnglishVoice() {
@@ -30,9 +33,9 @@ function pickFemaleEnglishVoice() {
   )
 }
 
-function speakAloud(text, { delayMs = 0 } = {}) {
+function speakAloud(text, { delayMs = 0, queue = false } = {}) {
   if (!('speechSynthesis' in window) || !text?.trim()) return
-  window.speechSynthesis.cancel()
+  if (!queue) window.speechSynthesis.cancel()
   const run = () => {
     const utter = new SpeechSynthesisUtterance(text)
     const voice = pickFemaleEnglishVoice()
@@ -43,6 +46,10 @@ function speakAloud(text, { delayMs = 0 } = {}) {
   }
   if (delayMs > 0) setTimeout(run, delayMs)
   else run()
+}
+
+function normalizeForCompare(s) {
+  return (s || '').trim().toLowerCase().replace(/[.!?]+$/g, '')
 }
 
 const VOICE_ERRORS = {
@@ -67,8 +74,11 @@ export default function VoiceConsole({
   identityVerified = true,
   runWorkflow,
   assistantLabel,
+  /** When true, no browser mic/TTS — use VapiVoicePanel for voice instead. */
+  useVapiVoice = isVapiConfigured(),
 }) {
   const toast = useToast()
+  const vapiCall = useVapiCall()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [assistantName, setAssistantName] = useState(assistantLabel || 'Guardian')
@@ -102,12 +112,12 @@ export default function VoiceConsole({
   }, [userId, userName, assistantLabel])
 
   useEffect(() => {
-    if (!('speechSynthesis' in window)) return
+    if (useVapiVoice || !('speechSynthesis' in window)) return
     const load = () => pickFemaleEnglishVoice()
     load()
     window.speechSynthesis.addEventListener('voiceschanged', load)
     return () => window.speechSynthesis.removeEventListener('voiceschanged', load)
-  }, [])
+  }, [useVapiVoice])
 
   const runCommand = useCallback(
     async (commandText) => {
@@ -115,10 +125,25 @@ export default function VoiceConsole({
       if (!trimmed || busy) return
       setBusy(true)
       setText('')
+      let earlyAck = ''
       try {
+        let plan = null
+        try {
+          plan = await planJarvisCommand(trimmed, userName, sessionContext)
+          if (plan?.context?.active) setSessionContext(plan.context)
+          earlyAck = (plan.jarvis_brief || plan.understood || '').trim()
+          if (earlyAck) {
+            const viaVapi = useVapiVoice && vapiCall?.active && vapiCall?.speak?.(earlyAck)
+            if (!viaVapi && useVapiVoice) speakBrowser(earlyAck)
+            else if (!useVapiVoice) speakAloud(earlyAck, { delayMs: 0 })
+          }
+        } catch {
+          plan = null
+        }
+
         const res = runWorkflow
-          ? await runWorkflow({ text: trimmed, context: sessionContext })
-          : await sendJarvisCommand(trimmed, userName, sessionContext)
+          ? await runWorkflow({ text: trimmed, context: sessionContext, plan })
+          : await sendJarvisCommand(trimmed, userName, sessionContext, plan)
         if (res.context) setSessionContext(res.context?.active ? res.context : null)
         const entry = {
           id: Date.now(),
@@ -130,14 +155,31 @@ export default function VoiceConsole({
         }
         setHistory((prev) => [entry, ...prev.slice(0, 14)])
         setLastReply(entry)
-        speakAloud(res.message, { delayMs: 400 })
+
+        const finalMsg = (res.message || '').trim()
+        const speakLine = finalMsg || earlyAck
+        if (speakLine) {
+          const viaVapi =
+            useVapiVoice && vapiCall?.active && vapiCall?.speak?.(speakLine)
+          if (!viaVapi) {
+            if (useVapiVoice) {
+              speakBrowser(speakLine)
+            } else if (finalMsg && normalizeForCompare(finalMsg) !== normalizeForCompare(earlyAck)) {
+              speakAloud(finalMsg, { delayMs: earlyAck ? 300 : 200, queue: Boolean(earlyAck) })
+            } else if (!earlyAck && finalMsg) {
+              speakAloud(finalMsg, { delayMs: 200 })
+            } else if (earlyAck) {
+              speakAloud(earlyAck, { delayMs: 0 })
+            }
+          }
+        }
       } catch (err) {
         toast.error(err.message || 'Could not reach server')
       } finally {
         setBusy(false)
       }
     },
-    [busy, toast, userName, sessionContext, runWorkflow],
+    [busy, toast, userName, sessionContext, runWorkflow, useVapiVoice, vapiCall],
   )
 
   const onVoiceResult = useCallback(
@@ -163,10 +205,11 @@ export default function VoiceConsole({
       onError: onVoiceError,
     })
 
-  const micBlocked = !supported
-  const micBusy = recording || transcribing
+  const micBlocked = !useVapiVoice && !supported
+  const micBusy = !useVapiVoice && (recording || transcribing)
 
   const onMicClick = () => {
+    if (useVapiVoice) return
     if (busy && !recording && !transcribing) {
       toast.error('Wait for the current command to finish.')
       return
@@ -193,34 +236,33 @@ export default function VoiceConsole({
         : 'bg-gradient-to-br from-cyan-500/15 to-slate-900 shadow-[0_0_40px_rgba(6,182,212,0.15)] hover:shadow-[0_0_60px_rgba(6,182,212,0.25)]'
 
   return (
-    <div className="w-full">
-      {/* HUD ring + mic orb */}
-      <div className="relative mb-3 flex items-center justify-center">
+    <div className="flex w-full max-w-md flex-col items-center text-center">
+      {!useVapiVoice && (
+      <>
+      <div className="relative mb-5 flex items-center justify-center">
+        <span
+          className={`absolute h-28 w-28 rounded-full bg-cyan-500/10 blur-xl transition-opacity ${
+            recording ? 'opacity-100' : 'opacity-70'
+          }`}
+        />
         <button
           type="button"
           onClick={onMicClick}
           disabled={micBlocked || transcribing || (busy && !recording)}
           title={recording ? 'Tap to stop and send' : 'Tap to speak'}
-          className={`relative z-10 flex h-20 w-20 cursor-pointer items-center justify-center rounded-full transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-40 ${orbClass}`}
+          className={`relative z-10 flex h-24 w-24 cursor-pointer items-center justify-center rounded-full border border-white/10 bg-[#0d1219] transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-40 ${orbClass}`}
         >
-          <span
-            className={`absolute inset-0 rounded-full bg-gradient-to-br from-cyan-400/20 to-transparent ${
-              recording ? 'opacity-100' : 'opacity-60'
-            }`}
-          />
           <MicIcon
-            className={`relative h-10 w-10 ${
+            className={`relative h-11 w-11 drop-shadow-[0_0_12px_rgba(34,211,238,0.55)] ${
               recording ? 'text-white' : 'text-cyan-400'
             }`}
           />
         </button>
       </div>
 
-      <p className="mb-1 text-xs font-medium text-cyan-400">
-        {statusLabel}
-      </p>
+      <p className="text-sm font-medium text-cyan-400">{statusLabel}</p>
       {mode === 'browser' && !micBusy && (
-        <p className="mb-4 text-xs text-slate-400">Live speech enabled</p>
+        <p className="mt-1 text-xs text-slate-500">Live speech enabled</p>
       )}
 
       {recording && interim && (
@@ -239,6 +281,16 @@ export default function VoiceConsole({
           </div>
         </div>
       )}
+      </>
+      )}
+
+      {useVapiVoice && (
+        <p className="mb-4 text-xs text-slate-500">
+          {vapiCall?.active
+            ? 'Typed commands use Vapi or browser voice.'
+            : 'Start the purple Vapi mic above, or type — browser will speak replies.'}
+        </p>
+      )}
 
       {lastReply && !micBusy && !busy && (
         <div
@@ -252,15 +304,14 @@ export default function VoiceConsole({
         </div>
       )}
 
-      {micBlocked && (
+      {micBlocked && !useVapiVoice && (
         <p className="mb-4 text-center text-xs text-red-400/80">
-          Mic unavailable ? use Chrome or Edge
+          Mic unavailable — use Chrome or Edge
         </p>
       )}
 
-      {/* command input */}
       <form
-        className="flex w-full gap-2"
+        className={`flex w-full gap-2 ${useVapiVoice ? 'mt-2' : 'mt-8'}`}
         onSubmit={(e) => {
           e.preventDefault()
           runCommand(text)
@@ -271,12 +322,12 @@ export default function VoiceConsole({
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Command?"
-          className="min-w-0 flex-1 rounded-lg border border-white/15 bg-[#0b1018] px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
+          className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#0a0e14] px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-cyan-500/40 focus:ring-1 focus:ring-cyan-500/25"
         />
         <button
           type="submit"
           disabled={busy || !text.trim()}
-          className="shrink-0 cursor-pointer rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
+          className="shrink-0 cursor-pointer rounded-xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-white shadow-[0_0_20px_rgba(6,182,212,0.25)] hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Run
         </button>

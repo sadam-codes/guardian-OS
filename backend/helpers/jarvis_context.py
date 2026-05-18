@@ -13,9 +13,10 @@ from schemas.jarvis import JarvisIntent, JarvisSessionContext
 CONTEXT_TTL_SEC = int(os.getenv("JARVIS_CONTEXT_TTL_SEC", "600"))
 
 _WRITE_RE = re.compile(
-    r"^(?:please\s+)?(?:write|type|create|add|put)\s+(.+?)(?:\s+in\s+it)?\.?\s*$",
+    r"^(?:please\s+)?(?:write|type|add|put)\s+(.+?)(?:\s+in\s+it)?\.?\s*$",
     re.I,
 )
+_CREATE_FOLDER_RE = re.compile(r"^create\s+(?:a\s+)?folder\b", re.I)
 _RUN_RE = re.compile(
     r"^(?:please\s+)?(?:run|start|execute|launch)\s+"
     r"(?:the\s+)?(?:project|server|app|backend|folder|it|this)?\s*"
@@ -180,6 +181,39 @@ def parse_followup_intent(text: str, ctx: JarvisSessionContext) -> JarvisIntent 
                 slots={"app": "Visual Studio Code", "path": str(folder)},
             )
 
+    if _CREATE_FOLDER_RE.search(clean):
+        from helpers.jarvis_folder import parse_create_folder_intent
+
+        folder = parse_create_folder_intent(clean)
+        if folder:
+            if not (folder.slots.get("parent") or "").strip():
+                from helpers.jarvis_session_memory import _parent_from_ctx
+
+                parent = _parent_from_ctx(ctx)
+                if parent:
+                    slots = dict(folder.slots)
+                    slots["parent"] = parent
+                    folder = JarvisIntent(
+                        intent=folder.intent,
+                        confidence=folder.confidence,
+                        slots=slots,
+                    )
+            return folder
+
+    if re.match(r"^(?:open\s+)?(?:it|that|this)(?:\s+folder)?\.?\s*$", clean, re.I):
+        if ctx.last_path:
+            return JarvisIntent(
+                intent="open_path",
+                confidence=0.94,
+                slots={"path": ctx.last_path},
+            )
+        if ctx.last_app:
+            return JarvisIntent(
+                intent="open_app",
+                confidence=0.9,
+                slots={"app": ctx.last_app, "path": ctx.last_path or ""},
+            )
+
     m = _WRITE_RE.match(clean)
     if m:
         content = m.group(1).strip().strip("'\"")
@@ -252,10 +286,32 @@ def update_context_after_action(
             or target_label
             or out.last_app
         )
-    if intent.intent in ("open_path", "open_folder", "run_project", "write_text", "type_text", "open_terminal_here"):
-        path = resolved_path or intent.slots.get("path") or out.last_path
+    if intent.intent in ("type_text", "send_voice_message", "start_call"):
+        recip = (intent.slots.get("recipient") or "").strip()
+        if recip and recip.lower() not in ("him", "her", "them", "he", "she"):
+            out.last_recipient = recip
+        elif target_label and intent.intent == "send_voice_message":
+            out.last_recipient = target_label
+    if intent.intent in (
+        "open_path",
+        "open_folder",
+        "create_folder",
+        "run_project",
+        "write_text",
+        "type_text",
+        "open_terminal_here",
+        "run_powershell",
+        "compound",
+    ):
+        path = resolved_path or intent.slots.get("path") or intent.slots.get("parent") or out.last_path
         if path:
-            out.last_path = str(Path(path).resolve()) if Path(path).exists() else path
+            try:
+                p = Path(path)
+                out.last_path = str(p.resolve()) if p.exists() else str(path)
+                if p.drive:
+                    out.last_drive = str(p.drive) + "\\"
+            except OSError:
+                out.last_path = str(path)
     if target_label:
         out.last_label = target_label
     elif intent.intent == "open_app" and out.last_app:

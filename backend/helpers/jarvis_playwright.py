@@ -5,6 +5,7 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+import sys
 import threading
 from typing import TYPE_CHECKING
 
@@ -130,7 +131,11 @@ atexit.register(_session.shutdown)
 
 
 def jarvis_browser_goto(url: str) -> tuple[bool, str | None]:
-    """Open URL in the managed Playwright browser. Returns (ok, error_message)."""
+    """Open URL in Playwright; Instagram uses the dedicated Instagram browser profile."""
+    if "instagram.com" in (url or "").lower():
+        from helpers.jarvis_instagram import open_instagram_url
+
+        return open_instagram_url(url)
     if not _use_playwright():
         return _fallback_open_url(url)
     try:
@@ -155,8 +160,6 @@ def jarvis_youtube_play(query: str) -> tuple[bool, str | None]:
 
 def _fallback_open_url(url: str, playwright_err: str | None = None) -> tuple[bool, str | None]:
     """Windows default browser when Playwright is disabled or failed."""
-    import sys
-
     try:
         if sys.platform == "win32":
             os.startfile(url)  # noqa: S606

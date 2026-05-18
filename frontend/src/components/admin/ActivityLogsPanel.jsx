@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchActivityLogs } from '../../api/activity'
+import AdminSectionHeader from './AdminSectionHeader'
 
 const ROLE_ADMIN = 'admin'
 const POLL_MS = 3000
 
 const STATUS_STYLES = {
-  success: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-  failure: 'bg-red-50 text-red-700 border-red-100',
-  warning: 'bg-amber-50 text-amber-700 border-amber-100',
-  info: 'bg-slate-50 text-slate-600 border-slate-100',
+  success: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  failure: 'bg-red-500/10 text-red-400 border-red-500/20',
+  warning: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  info: 'bg-slate-500/10 text-slate-400 border-slate-500/20',
 }
 
 export default function ActivityLogsPanel() {
@@ -64,43 +65,43 @@ export default function ActivityLogsPanel() {
   }, [live, pollNew])
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900">Activity logs</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Live monitoring of sign-ins, enrollments, and admin actions.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setLive((v) => !v)}
-            className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold ${
-              live ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'
-            }`}
-          >
-            {live ? '● Live' : 'Paused'}
-          </button>
-          <button
-            type="button"
-            onClick={loadInitial}
-            className="cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-          >
-            Refresh
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <AdminSectionHeader
+        title="Activity logs"
+        subtitle="Live monitoring of sign-ins, enrollments, and admin actions."
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setLive((v) => !v)}
+              className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                live
+                  ? 'bg-emerald-500/15 text-emerald-400'
+                  : 'bg-white/5 text-slate-400'
+              }`}
+            >
+              {live ? '● Live' : 'Paused'}
+            </button>
+            <button
+              type="button"
+              onClick={loadInitial}
+              className="cursor-pointer rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-white/10"
+            >
+              Refresh
+            </button>
+          </div>
+        }
+      />
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#121820]">
         {loading ? (
           <p className="p-8 text-center text-sm text-slate-500">Loading activity…</p>
         ) : logs.length === 0 ? (
           <p className="p-8 text-center text-sm text-slate-500">No activity recorded yet.</p>
         ) : (
-          <ul className="max-h-[calc(100vh-14rem)] divide-y divide-slate-100 overflow-y-auto">
+          <ul className="max-h-[calc(100vh-14rem)] divide-y divide-white/[0.06] overflow-y-auto">
             {logs.map((log) => (
-              <li key={log.id} className="flex gap-4 px-4 py-3 hover:bg-slate-50/80">
+              <li key={log.id} className="flex gap-4 px-4 py-3 hover:bg-white/[0.02]">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span
@@ -110,11 +111,11 @@ export default function ActivityLogsPanel() {
                     >
                       {log.status}
                     </span>
-                    <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
                       {formatEventType(log.event_type)}
                     </span>
                   </div>
-                  <p className="mt-1 text-sm text-slate-800">{log.message}</p>
+                  <p className="mt-1 text-sm text-slate-200">{log.message}</p>
                   {(log.actor_name || log.target_name) && (
                     <p className="mt-0.5 text-xs text-slate-500">
                       {log.actor_name && <span>By {log.actor_name}</span>}
@@ -123,7 +124,7 @@ export default function ActivityLogsPanel() {
                     </p>
                   )}
                 </div>
-                <time className="shrink-0 text-xs text-slate-400">{formatTime(log.created_at)}</time>
+                <time className="shrink-0 text-xs text-slate-500">{formatTime(log.created_at)}</time>
               </li>
             ))}
           </ul>

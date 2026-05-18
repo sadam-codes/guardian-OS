@@ -21,6 +21,7 @@ export async function executeGuardianWorkflow({
   identityVerified,
   gesture,
   context,
+  plan,
 }) {
   const res = await fetch(`${API_BASE}/guardian/workflow/execute`, {
     method: 'POST',
@@ -32,6 +33,9 @@ export async function executeGuardianWorkflow({
       identity_verified: Boolean(identityVerified),
       gesture: gesture || null,
       context: context?.active ? context : null,
+      planned_steps: plan?.planned_steps ?? null,
+      understood: plan?.understood ?? null,
+      jarvis_brief: plan?.jarvis_brief ?? null,
     }),
   })
   if (!res.ok) throw new Error(await parseError(res))

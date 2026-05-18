@@ -62,6 +62,19 @@ def friendly_url_label(url: str) -> str:
     return "that website"
 
 
+_GENERIC_BROWSER = frozenset({
+    "browser",
+    "web browser",
+    "the browser",
+    "a browser",
+    "my browser",
+    "internet",
+    "the internet",
+    "default browser",
+    "web",
+})
+
+
 def _clean_query(raw: str) -> str:
     q = " ".join(raw.strip().split())
     for prefix in ("please ", "can you ", "could you ", "open ", "launch ", "go to "):
@@ -73,6 +86,15 @@ def _clean_query(raw: str) -> str:
     return q.strip()
 
 
+def is_generic_browser_request(raw: str) -> bool:
+    """Spoken 'open browser' — not a Start menu app name."""
+    name = _clean_query(raw).lower()
+    name = re.sub(r"\s+(app|application|program|software)$", "", name).strip()
+    if name in _GENERIC_BROWSER:
+        return True
+    return name.endswith(" browser") and name.removesuffix(" browser") in {"", "web", "the", "my", "a"}
+
+
 def resolve_web_open(raw: str) -> tuple[str, str] | None:
     """
     If the target should open in a browser, return (url, display_label).
@@ -81,6 +103,9 @@ def resolve_web_open(raw: str) -> tuple[str, str] | None:
     q = _clean_query(raw)
     if not q:
         return None
+
+    if is_generic_browser_request(raw):
+        return "https://www.google.com", "your browser"
 
     lower = q.lower()
 

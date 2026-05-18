@@ -6,6 +6,7 @@ import re
 
 _MESSAGING_KEYWORDS = (
     "whatsapp",
+    "instagram",
     "telegram",
     "discord",
     "teams",
@@ -23,7 +24,11 @@ _MESSAGE_TO_RE = re.compile(
     re.I,
 )
 _SEND_TO_RE = re.compile(
-    r"^send\s+(?P<content>.+)\s+to\s+(?P<recipient>.+)$",
+    r"^send\s+(?P<content>.+?)\s+(?:message\s+)?to\s+(?P<recipient>.+)$",
+    re.I,
+)
+_MSG_TO_RE = re.compile(
+    r"^(?P<body>.+?)\s+(?:message\s+)?to\s+(?P<recipient>.+)$",
     re.I,
 )
 _TO_RECIPIENT_RE = re.compile(
@@ -34,6 +39,16 @@ _CHAT_PHRASE_RE = re.compile(
     r"\b(?:message|text|sms)\s+to\b|\bsend\s+.+\s+to\b",
     re.I,
 )
+_VOICE_PHRASE_RE = re.compile(
+    r"\bvoice\s*(?:message|note|msg)\b|\baudio\s*message\b",
+    re.I,
+)
+_CALL_PHRASE_RE = re.compile(
+    r"\b(?:video\s*call|audio\s*call|voice\s*call|phone\s*call)\b|"
+    r"\bcall\s+(?:him|her|them|\w+)",
+    re.I,
+)
+_PRONOUN_RECIPIENTS = frozenset({"him", "her", "them", "he", "she", "they"})
 
 
 def is_messaging_app(name: str | None) -> bool:
@@ -43,8 +58,43 @@ def is_messaging_app(name: str | None) -> bool:
     return any(k in low for k in _MESSAGING_KEYWORDS)
 
 
+def is_instagram_app(name: str | None) -> bool:
+    return bool(name and "instagram" in name.lower())
+
+
 def looks_like_chat_message(text: str) -> bool:
-    return bool(_CHAT_PHRASE_RE.search((text or "").strip()))
+    t = (text or "").strip()
+    if _VOICE_PHRASE_RE.search(t):
+        return False
+    return bool(_CHAT_PHRASE_RE.search(t))
+
+
+def looks_like_voice_message(text: str) -> bool:
+    t = text or ""
+    if _CALL_PHRASE_RE.search(t) and "voice message" not in t.lower():
+        return False
+    return bool(_VOICE_PHRASE_RE.search(t))
+
+
+def looks_like_call_request(text: str) -> bool:
+    from helpers.jarvis_calls import wants_call
+
+    return wants_call(text)
+
+
+def resolve_recipient_pronoun(
+    recipient: str,
+    ctx: object | None,
+) -> str:
+    """Map him/her/them → last chat contact from session memory."""
+    r = (recipient or "").strip()
+    if not r:
+        if ctx and getattr(ctx, "last_recipient", None):
+            return str(ctx.last_recipient)
+        return r
+    if r.lower() in _PRONOUN_RECIPIENTS and ctx and getattr(ctx, "last_recipient", None):
+        return str(ctx.last_recipient)
+    return r
 
 
 def _split_recipient_and_body(rest: str) -> tuple[str, str]:
@@ -77,6 +127,12 @@ def parse_message_slots(content: str) -> tuple[str | None, str, bool]:
     if m:
         recipient = _strip_quotes(m.group("recipient").strip())
         body = _strip_quotes(m.group("content").strip())
+        return recipient or None, body, True
+
+    m = _MSG_TO_RE.match(raw)
+    if m:
+        recipient = _strip_quotes(m.group("recipient").strip())
+        body = _strip_quotes(m.group("body").strip())
         return recipient or None, body, True
 
     for pattern in (_MESSAGE_TO_RE, _TO_RECIPIENT_RE):

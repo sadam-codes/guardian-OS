@@ -1,7 +1,13 @@
 import re
 
+from helpers.jarvis_recycle import is_recycle_bin_maintenance_command
+
 RISKY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\b(format|wipe|delete\s+all|rm\s+-rf)\b", re.I), "destructive disk operation"),
+    (re.compile(r"\b(format|wipe|rm\s+-rf)\b", re.I), "destructive disk operation"),
+    (
+        re.compile(r"\bdelete\s+all\b", re.I),
+        "destructive delete-all (outside Recycle Bin)",
+    ),
     (re.compile(r"\b(ransomware|malware|virus|keylogger)\b", re.I), "malicious software reference"),
     (re.compile(r"\b(password|credential|api[_\s]?key|secret)\b.*\b(send|email|upload)\b", re.I), "credential exfiltration"),
     (re.compile(r"\bdisable\s+(firewall|defender|antivirus)\b", re.I), "security disable"),
@@ -9,7 +15,7 @@ RISKY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 CONFIRM_INTENTS = {"shutdown", "restart", "lock"}
 
-BLOCKED_WITHOUT_VERIFY = {"shutdown", "restart", "lock", "open_terminal", "run_project"}
+BLOCKED_WITHOUT_VERIFY = {"shutdown", "restart", "lock", "open_terminal", "run_project", "run_powershell"}
 
 
 def validate_command_safety(
@@ -22,9 +28,14 @@ def validate_command_safety(
     if not stripped:
         return False, "Empty command."
 
+    recycle_cmd = is_recycle_bin_maintenance_command(stripped)
+
     for pattern, reason in RISKY_PATTERNS:
-        if pattern.search(stripped):
-            return False, f"Blocked for safety: {reason}."
+        if not pattern.search(stripped):
+            continue
+        if recycle_cmd and ("delete-all" in reason or reason == "destructive disk operation"):
+            continue
+        return False, f"Blocked for safety: {reason}."
 
     low = stripped.lower()
     if intent_hint in CONFIRM_INTENTS or any(

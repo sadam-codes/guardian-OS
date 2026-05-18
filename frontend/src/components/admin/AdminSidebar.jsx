@@ -1,3 +1,5 @@
+import AppSidebar from '../layout/AppSidebar'
+
 const NAV = [
   {
     id: 'dashboard',
@@ -32,49 +34,12 @@ function navHref(id, href, linkNav) {
 }
 
 export default function AdminSidebar({ active, onChange, linkNav = false }) {
-  return (
-    <aside className="flex w-full shrink-0 flex-col border-b border-slate-200 bg-white lg:w-64 lg:border-b-0 lg:border-r">
-      <nav className="flex gap-1 overflow-x-auto p-3 lg:flex-col lg:overflow-visible lg:p-4">
-        {NAV.map(({ id, label, icon: Icon, href }) => {
-          const target = navHref(id, href, linkNav)
-          const isActive = active === id
+  const items = NAV.map((item) => ({
+    ...item,
+    href: navHref(item.id, item.href, linkNav) || undefined,
+  }))
 
-          if (target) {
-            return (
-              <a
-                key={id}
-                href={target}
-                className={`flex shrink-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition lg:w-full ${
-                  isActive
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                }`}
-              >
-                <Icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
-                {label}
-              </a>
-            )
-          }
-
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => onChange(id)}
-              className={`flex shrink-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition lg:w-full ${
-                isActive
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-              }`}
-            >
-              <Icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
-              {label}
-            </button>
-          )
-        })}
-      </nav>
-    </aside>
-  )
+  return <AppSidebar items={items} active={active} onChange={onChange} />
 }
 
 function DashboardIcon({ className }) {

@@ -8,7 +8,21 @@ async function parseError(response) {
   return 'Command failed.'
 }
 
-export async function sendJarvisCommand(text, userName, context = null) {
+export async function planJarvisCommand(text, userName, context = null) {
+  const res = await fetch(`${API_BASE}/jarvis/plan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      user_name: userName || null,
+      context: context?.active ? context : null,
+    }),
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
+
+export async function sendJarvisCommand(text, userName, context = null, plan = null) {
   const res = await fetch(`${API_BASE}/jarvis/command`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -16,6 +30,9 @@ export async function sendJarvisCommand(text, userName, context = null) {
       text,
       user_name: userName || null,
       context: context?.active ? context : null,
+      planned_steps: plan?.planned_steps ?? null,
+      understood: plan?.understood ?? null,
+      jarvis_brief: plan?.jarvis_brief ?? null,
     }),
   })
   if (!res.ok) throw new Error(await parseError(res))
