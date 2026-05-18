@@ -10,7 +10,9 @@ export default function LiveFaceScanner({
   onCameraReadyChange,
   scanIntervalMs = 400,
   captureQuality = 0.88,
+  theme = 'light',
 }) {
+  const dark = theme === 'dark'
   const videoRef = useRef(null)
   const containerRef = useRef(null)
   const streamRef = useRef(null)
@@ -227,9 +229,24 @@ export default function LiveFaceScanner({
     statusColor = 'bg-slate-400 animate-pulse'
   }
 
+  const frameClass = dark
+    ? 'overflow-hidden rounded-2xl border border-white/10 bg-[#0b1018] shadow-[0_0_40px_rgba(6,182,212,0.08)]'
+    : 'overflow-hidden rounded-2xl border border-slate-200 bg-slate-900 shadow-lg'
+  const overlayClass = dark ? 'bg-[#0b1018]' : 'bg-slate-800'
+  const openBtnClass = dark
+    ? 'cursor-pointer rounded-xl bg-cyan-600 px-6 py-3 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-50'
+    : 'cursor-pointer rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50'
+  const iconClass = dark ? 'h-12 w-12 text-cyan-400' : 'h-12 w-12 text-violet-400'
+  const retryBtnClass = dark
+    ? 'cursor-pointer rounded-xl border border-white/15 bg-[#121a26] px-5 py-2.5 text-sm text-slate-200 hover:bg-white/5'
+    : 'cursor-pointer rounded-xl border border-slate-500 bg-slate-700 px-5 py-2.5 text-sm text-white'
+  const faceBorderClass = dark
+    ? 'pointer-events-none absolute rounded-lg border-2 border-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.8)]'
+    : 'pointer-events-none absolute rounded-lg border-2 border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.8)]'
+
   return (
     <div className="w-full">
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-900 shadow-lg">
+      <div className={frameClass}>
         <div ref={containerRef} className="relative">
           <video
             ref={videoRef}
@@ -239,8 +256,8 @@ export default function LiveFaceScanner({
           />
 
           {showOpen && (
-            <div className="absolute inset-0 flex aspect-[4/3] flex-col items-center justify-center gap-4 bg-slate-800 p-6 text-center">
-              <FaceIcon className="h-12 w-12 text-violet-400" />
+            <div className={`absolute inset-0 flex aspect-[4/3] flex-col items-center justify-center gap-4 p-6 text-center ${overlayClass}`}>
+              <FaceIcon className={iconClass} />
               <p className="max-w-xs text-sm text-slate-300">
                 {enabled ? 'Open the camera to scan your face.' : 'Enter your name first.'}
               </p>
@@ -248,7 +265,7 @@ export default function LiveFaceScanner({
                 type="button"
                 onClick={openCamera}
                 disabled={!enabled}
-                className="cursor-pointer rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                className={openBtnClass}
               >
                 Open camera
               </button>
@@ -256,18 +273,18 @@ export default function LiveFaceScanner({
           )}
 
           {showLoading && (
-            <div className="absolute inset-0 flex aspect-[4/3] items-center justify-center bg-slate-800 text-white">
+            <div className={`absolute inset-0 flex aspect-[4/3] items-center justify-center text-white ${overlayClass}`}>
               <span className="text-sm text-slate-300">Starting camera…</span>
             </div>
           )}
 
           {cameraError && (
-            <div className="absolute inset-0 flex aspect-[4/3] flex-col items-center justify-center gap-4 bg-slate-800 p-6 text-center">
+            <div className={`absolute inset-0 flex aspect-[4/3] flex-col items-center justify-center gap-4 p-6 text-center ${overlayClass}`}>
               <p className="text-sm text-red-200">{cameraError}</p>
               <button
                 type="button"
                 onClick={openCamera}
-                className="cursor-pointer rounded-xl border border-slate-500 bg-slate-700 px-5 py-2.5 text-sm text-white"
+                className={retryBtnClass}
               >
                 Try again
               </button>
@@ -284,7 +301,7 @@ export default function LiveFaceScanner({
             <>
               {faceBox && !busy && (
                 <div
-                  className="pointer-events-none absolute rounded-lg border-2 border-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.8)]"
+                  className={faceBorderClass}
                   style={{ left: faceBox.x, top: faceBox.y, width: faceBox.w, height: faceBox.h }}
                 />
               )}

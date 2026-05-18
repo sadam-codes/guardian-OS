@@ -1,36 +1,29 @@
 const NAV = [
-  {
-    id: 'home',
-    label: 'Home',
-    href: '/user',
-    icon: HomeIcon,
-  },
-  {
-    id: 'jarvis',
-    label: 'Voice assistant',
-    href: '/jarvis',
-    icon: JarvisIcon,
-  },
+  { id: 'home', label: 'Home', href: '/user', icon: HomeIcon },
+  { id: 'jarvis', label: 'Assistant', href: '/jarvis', icon: JarvisIcon },
 ]
 
 export default function UserSidebar({ active }) {
   return (
-    <aside className="flex w-full shrink-0 flex-col border-b border-slate-200 bg-white lg:w-64 lg:border-b-0 lg:border-r">
-      <nav className="flex gap-1 overflow-x-auto p-3 lg:flex-col lg:overflow-visible lg:p-4">
+    <aside className="shrink-0 border-b border-white/10 bg-[#0d131c] lg:w-52 lg:border-b-0 lg:border-r">
+      <nav className="flex gap-1 p-2 lg:flex-col lg:p-3">
         {NAV.map(({ id, label, icon: Icon, href }) => {
           const isActive = active === id
           return (
             <a
               key={id}
               href={href}
-              className={`flex shrink-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition lg:w-full ${
+              className={`flex flex-1 cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium transition lg:flex-none ${
                 isActive
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  ? 'border border-cyan-500/25 bg-cyan-500/10 text-cyan-300'
+                  : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
               }`}
             >
-              <Icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
+              <Icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-cyan-400' : 'text-slate-500'}`} />
               {label}
+              {isActive && (
+                <span className="ml-auto hidden h-1.5 w-1.5 rounded-full bg-cyan-400 lg:block" />
+              )}
             </a>
           )
         })}

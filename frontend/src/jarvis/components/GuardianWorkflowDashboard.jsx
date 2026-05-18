@@ -50,37 +50,49 @@ export default function GuardianWorkflowDashboard({ session }) {
     [session, refreshEvents],
   )
 
+  const firstName = session?.name?.split(' ')[0] || 'User'
+
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-4">
-      <div className="rounded-xl border border-indigo-100 bg-gradient-to-r from-indigo-50 to-slate-50 px-4 py-3 sm:px-5">
-        <h1 className="text-lg font-bold text-slate-900">{assistantName} — Autonomous Guardian</h1>
-        <p className="text-xs text-slate-600 sm:text-sm">
-          Voice → AI decision → system actions → desktop control
-        </p>
+    <div className="mx-auto w-full max-w-5xl space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-white/10 pb-4">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wider text-cyan-400">Online</p>
+          <h1 className="text-2xl font-semibold text-slate-100">{assistantName}</h1>
+          <p className="text-sm text-slate-400">
+            Hello, <span className="text-cyan-300">{firstName}</span>
+          </p>
+        </div>
+        <WorkflowPipeline stages={lastStages} pipeline={pipeline} />
       </div>
 
-      <WorkflowPipeline stages={lastStages} pipeline={pipeline} />
-
-      <VoiceConsole
-        userName={session?.name}
-        userId={session?.id}
-        identityVerified
-        runWorkflow={runWorkflow}
-      />
-
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="mb-2 text-sm font-semibold text-slate-900">Automation & security events</h3>
-        <ul className="max-h-36 space-y-1 overflow-y-auto text-xs">
-          {events.length === 0 && <li className="text-slate-400">No recent events</li>}
-          {events.map((e, i) => (
-            <li key={`${e.ts}-${i}`} className="rounded border border-slate-100 bg-slate-50 px-2 py-1">
-              <span className="font-medium text-indigo-700">{e.type}</span>
-              {e.user && <span className="text-slate-500"> · {e.user}</span>}
-              {e.detail && <span className="text-slate-600"> — {e.detail}</span>}
-            </li>
-          ))}
-        </ul>
+      <div className="rounded-xl border border-white/10 bg-[#121a26] p-4 sm:p-5">
+        <VoiceConsole
+          userName={session?.name}
+          userId={session?.id}
+          identityVerified
+          runWorkflow={runWorkflow}
+          assistantLabel={assistantName}
+        />
       </div>
+
+      {events.length > 0 && (
+        <div className="rounded-xl border border-white/10 bg-[#121a26] p-4">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            Recent activity
+          </h3>
+          <ul className="max-h-28 space-y-1.5 overflow-y-auto">
+            {events.slice(0, 8).map((e, i) => (
+              <li
+                key={`${e.ts}-${i}`}
+                className="rounded-lg bg-[#0b1018] px-3 py-2 text-sm text-slate-300"
+              >
+                <span className="font-medium text-cyan-400">{e.type}</span>
+                {e.detail && <span className="text-slate-400"> — {e.detail}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

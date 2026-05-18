@@ -1,4 +1,4 @@
-const STYLES = {
+const LIGHT_STYLES = {
   idle: {
     wrap: 'border-slate-200 bg-slate-50 text-slate-800',
     icon: 'text-slate-500',
@@ -31,10 +31,44 @@ const STYLES = {
   },
 }
 
-export default function ScanStatusBanner({ message }) {
+const DARK_STYLES = {
+  idle: {
+    wrap: 'border-white/10 bg-[#0b1018] text-slate-300',
+    icon: 'text-slate-400',
+    bar: 'bg-slate-500',
+  },
+  progress: {
+    wrap: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100',
+    icon: 'text-cyan-400',
+    bar: 'bg-cyan-500',
+  },
+  loading: {
+    wrap: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100',
+    icon: 'text-cyan-400',
+    bar: 'bg-cyan-500',
+  },
+  success: {
+    wrap: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100',
+    icon: 'text-emerald-400',
+    bar: 'bg-emerald-500',
+  },
+  error: {
+    wrap: 'border-red-500/30 bg-red-500/10 text-red-200',
+    icon: 'text-red-400',
+    bar: 'bg-red-500',
+  },
+  blocked: {
+    wrap: 'border-amber-500/30 bg-amber-500/10 text-amber-100',
+    icon: 'text-amber-400',
+    bar: 'bg-amber-500',
+  },
+}
+
+export default function ScanStatusBanner({ message, theme = 'light' }) {
   if (!message?.title) return null
 
-  const style = STYLES[message.type] || STYLES.idle
+  const palette = theme === 'dark' ? DARK_STYLES : LIGHT_STYLES
+  const style = palette[message.type] || palette.idle
 
   return (
     <div

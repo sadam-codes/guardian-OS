@@ -1,20 +1,38 @@
-export default function PageHeader({ title, subtitle, session, onLogout, extra }) {
+export default function PageHeader({ title, subtitle, session, onLogout, extra, theme = 'light' }) {
+  const dark = theme === 'dark'
+
   return (
-    <header className="border-b border-slate-200/80 bg-white/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
+    <header
+      className={
+        dark
+          ? 'border-b border-white/10 bg-[#0b1018]'
+          : 'border-b border-slate-200/80 bg-white/80 backdrop-blur-md'
+      }
+    >
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 shadow-md shadow-indigo-600/25">
-            <ShieldIcon className="h-5 w-5 text-white" />
+          <div
+            className={
+              dark
+                ? 'flex h-9 w-9 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/10'
+                : 'flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 shadow-md shadow-indigo-600/25'
+            }
+          >
+            <ShieldIcon className={`h-5 w-5 ${dark ? 'text-cyan-400' : 'text-white'}`} />
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-slate-900 sm:text-xl">{title}</h1>
-            <p className="text-sm text-slate-500">{subtitle}</p>
+            <h1 className={`font-semibold ${dark ? 'text-sm text-slate-100' : 'text-lg text-slate-900 sm:text-xl'}`}>
+              {title}
+            </h1>
+            <p className={`text-xs ${dark ? 'text-slate-500' : 'text-sm text-slate-500'}`}>{subtitle}</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
           {extra}
           {session && (
-            <span className="text-sm font-medium text-slate-700">{session.name}</span>
+            <span className={`text-sm font-medium ${dark ? 'text-slate-400' : 'text-slate-700'}`}>
+              {session.name}
+            </span>
           )}
           {session ? (
             <button
@@ -22,12 +40,22 @@ export default function PageHeader({ title, subtitle, session, onLogout, extra }
               onClick={onLogout}
               aria-label="Log out"
               title="Log out"
-              className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+              className={
+                dark
+                  ? 'flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-white/10 text-slate-400 transition hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400'
+                  : 'flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-600'
+              }
             >
               <LogoutIcon className="h-5 w-5" />
             </button>
           ) : (
-            <div className="hidden items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 sm:flex">
+            <div
+              className={
+                dark
+                  ? 'hidden items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400 sm:flex'
+                  : 'hidden items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 sm:flex'
+              }
+            >
               <span className="h-2 w-2 rounded-full bg-emerald-500" />
               System online
             </div>
