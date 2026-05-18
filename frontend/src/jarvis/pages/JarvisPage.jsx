@@ -4,7 +4,7 @@ import AdminSidebar from '../../components/admin/AdminSidebar'
 import PageHeader from '../../components/PageHeader'
 import UserSidebar from '../../components/user/UserSidebar'
 import { useToast } from '../../components/ToastProvider'
-import VoiceConsole from '../components/VoiceConsole'
+import GuardianWorkflowDashboard from '../components/GuardianWorkflowDashboard'
 import { getSession, logoutToHome } from '../../lib/session'
 
 const ROLE_ADMIN = 'admin'
@@ -47,9 +47,7 @@ export default function JarvisPage() {
         )}
 
         <main className="flex-1 overflow-auto p-4 sm:p-5 lg:p-6">
-          <div className="mx-auto w-full max-w-4xl">
-            <VoiceConsole userName={session.name} />
-          </div>
+          <GuardianWorkflowDashboard session={session} />
         </main>
       </div>
     </div>

@@ -1,5 +1,6 @@
 ﻿import { useCallback, useEffect, useState } from 'react'
 import { fetchJarvisCapabilities, sendJarvisCommand } from '../api/jarvis'
+import { fetchFrequentCommands } from '../api/guardianWorkflow'
 import { useVoiceInput } from '../hooks/useVoiceInput'
 import { useToast } from '../../components/ToastProvider'
 
@@ -60,7 +61,12 @@ const VOICE_ERRORS = {
 
 const QUICK_EXAMPLES = 6
 
-export default function VoiceConsole({ userName }) {
+export default function VoiceConsole({
+  userName,
+  userId,
+  identityVerified = true,
+  runWorkflow,
+}) {
   const toast = useToast()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -70,6 +76,8 @@ export default function VoiceConsole({ userName }) {
   const [history, setHistory] = useState([])
   const [lastReply, setLastReply] = useState(null)
   const [sessionContext, setSessionContext] = useState(null)
+  const [workflowStages, setWorkflowStages] = useState([])
+
   useEffect(() => {
     fetchJarvisCapabilities()
       .then((data) => {
@@ -77,7 +85,16 @@ export default function VoiceConsole({ userName }) {
         setExamples(data.examples || [])
       })
       .catch(() => {})
-  }, [])
+    if (userId || userName) {
+      fetchFrequentCommands(userId, userName)
+        .then((d) => {
+          if (d.commands?.length) {
+            setExamples((prev) => [...new Set([...d.commands, ...prev])].slice(0, 12))
+          }
+        })
+        .catch(() => {})
+    }
+  }, [userId, userName])
 
   useEffect(() => {
     if (!('speechSynthesis' in window)) return
@@ -94,14 +111,18 @@ export default function VoiceConsole({ userName }) {
       setBusy(true)
       setText('')
       try {
-        const res = await sendJarvisCommand(trimmed, userName, sessionContext)
+        const res = runWorkflow
+          ? await runWorkflow({ text: trimmed, context: sessionContext })
+          : await sendJarvisCommand(trimmed, userName, sessionContext)
         if (res.context) setSessionContext(res.context?.active ? res.context : null)
+        if (res.stages) setWorkflowStages(res.stages)
         const entry = {
           id: Date.now(),
           input: trimmed,
           output: res.message,
           success: res.success,
           intent: res.intent,
+          blocked: res.security_blocked,
         }
         setHistory((prev) => [entry, ...prev.slice(0, 14)])
         setLastReply(entry)
@@ -112,7 +133,7 @@ export default function VoiceConsole({ userName }) {
         setBusy(false)
       }
     },
-    [busy, toast, userName, sessionContext],
+    [busy, toast, userName, sessionContext, runWorkflow],
   )
 
   const onVoiceResult = useCallback(
@@ -172,6 +193,9 @@ export default function VoiceConsole({ userName }) {
               )}
               {sessionContext?.active && (
                 <span className="ml-1 text-indigo-600">· follow-up on</span>
+              )}
+              {!identityVerified && (
+                <span className="ml-1 text-amber-600">· verify face for risky commands</span>
               )}
             </p>
           </div>

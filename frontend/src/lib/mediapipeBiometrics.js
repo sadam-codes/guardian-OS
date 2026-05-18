@@ -53,7 +53,7 @@ async function createWithDelegate(ModelClass, vision, modelPath, options) {
   }
 }
 
-async function ensureModels() {
+export async function ensureModels() {
   if (faceLandmarker && handLandmarker) {
     return { faceLandmarker, handLandmarker }
   }
